@@ -42,4 +42,13 @@ describe("HTTP API", () => {
     expect(body.status).toBe("error");
     expect(body.message).toContain("Invalid --range");
   });
+
+  test("rejects explicitly empty keywords before collection", async () => {
+    const app = createServer();
+    const response = await app.handle(new Request("http://localhost/api/trends?words="));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.status).toBe("error");
+    expect(body.message).toContain("Invalid words");
+  });
 });

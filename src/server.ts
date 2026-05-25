@@ -116,12 +116,20 @@ function pushString(args: string[], flag: string, value: unknown): void {
 }
 
 function pushWords(args: string[], value: unknown): void {
+  if (value === undefined || value === null) return;
+  const words = normalizeWords(value);
+  if (words.length === 0) throw new Error("Invalid words: expected at least one keyword");
+  args.push("--words", words.join(","));
+}
+
+function normalizeWords(value: unknown): string[] {
   if (Array.isArray(value)) {
-    const words = value.map((item) => String(item).trim()).filter(Boolean);
-    if (words.length > 0) args.push("--words", words.join(","));
-    return;
+    return value.map((item) => String(item).trim()).filter(Boolean);
   }
-  pushString(args, "--words", value);
+  if (typeof value === "string") {
+    return value.split(",").map((word) => word.trim()).filter(Boolean);
+  }
+  return [String(value).trim()].filter(Boolean);
 }
 
 function pushBoolean(args: string[], flag: string, value: unknown): void {

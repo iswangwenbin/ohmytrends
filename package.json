@@ -5,6 +5,14 @@
   "description": "Bun API / CLI for querying Google Trends and Baidu Index",
   "type": "module",
   "packageManager": "bun@1.3.11",
+  "homepage": "https://github.com/iswangwenbin/ohmytrends#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/iswangwenbin/ohmytrends.git"
+  },
+  "bugs": {
+    "url": "https://github.com/iswangwenbin/ohmytrends/issues"
+  },
   "bin": {
     "ohmytrends": "./src/cli.ts"
   },

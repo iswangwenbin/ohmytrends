@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ohmytrends/ohmytrends/schemas/unified-output.schema.json",
+  "$id": "https://github.com/iswangwenbin/ohmytrends/schemas/unified-output.schema.json",
   "title": "ohmytrends unified JSON output",
   "description": "Unified JSON output emitted by ohmytrends get --format json.",
   "oneOf": [
