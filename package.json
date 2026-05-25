@@ -9,7 +9,7 @@
     "ohmytrends": "./src/cli.ts"
   },
   "scripts": {
-    "build": "bun build ./src/cli.ts --compile --minify --external chromium-bidi --outfile ./dist/ohmytrends",
+    "build": "bun build ./src/cli.ts --compile --minify --external chromium-bidi --outfile ./bin/ohmytrends",
     "ci": "bun run typecheck && bun test",
     "dev": "OHMYTRENDS_LANG=zh bun src/cli.ts",
     "dev:debug": "OHMYTRENDS_LANG=zh OHMYTRENDS_HEADLESS=false OHMYTRENDS_KEEP_OPEN=true bun src/cli.ts",

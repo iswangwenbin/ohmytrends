@@ -54,13 +54,13 @@ Build a local executable:
 
 ```bash
 bun run build
-./dist/ohmytrends help
+./bin/ohmytrends help
 ```
 
 The build script uses Bun's single-file executable mode:
 
 ```bash
-bun build ./src/cli.ts --compile --minify --external chromium-bidi --outfile ./dist/ohmytrends
+bun build ./src/cli.ts --compile --minify --external chromium-bidi --outfile ./bin/ohmytrends
 ```
 
 `--minify` provides lightweight code minification. The `--external
@@ -72,14 +72,14 @@ your browser profile, cookies, login state, output files, or Chromium cache.
 
 ### Using The Built Binary
 
-After `bun run build`, use `./dist/ohmytrends` the same way you use
+After `bun run build`, use `./bin/ohmytrends` the same way you use
 `bun src/cli.ts` during development:
 
 ```bash
-./dist/ohmytrends help
-./dist/ohmytrends login
-./dist/ohmytrends logout google
-./dist/ohmytrends get --words "gemini,claude" --format json
+./bin/ohmytrends help
+./bin/ohmytrends login
+./bin/ohmytrends logout google
+./bin/ohmytrends get --words "gemini,claude" --format json
 ```
 
 First-time use still requires manual login. Run the binary login command once,
@@ -87,7 +87,7 @@ complete login in the visible browser, and the authenticated session will be
 stored in the persistent profile directories:
 
 ```bash
-./dist/ohmytrends login
+./bin/ohmytrends login
 ```
 
 By default, `--source all` stores sessions under:
@@ -100,21 +100,21 @@ example, this writes `exports/ohmytrends.json` under the current working
 directory:
 
 ```bash
-./dist/ohmytrends get --words "gemini" --format json
+./bin/ohmytrends get --words "gemini" --format json
 ```
 
 You can also place the built binary on your `PATH`:
 
 ```bash
 mkdir -p ~/.local/bin
-cp ./dist/ohmytrends ~/.local/bin/ohmytrends
+cp ./bin/ohmytrends ~/.local/bin/ohmytrends
 ohmytrends help
 ```
 
 For debugging a visible browser session:
 
 ```bash
-./dist/ohmytrends get --source google --words "gemini" --headless false --keep-open true
+./bin/ohmytrends get --source google --words "gemini" --headless false --keep-open true
 ```
 
 ## Quick Start
@@ -153,8 +153,8 @@ bun src/cli.ts get --words "gemini,claude" --format json
 Use the built binary:
 
 ```bash
-./dist/ohmytrends get --source google --words "gemini" --geo US --range 1y
-./dist/ohmytrends get --source baidu --words "微信指数,google" --range 30d
+./bin/ohmytrends get --source google --words "gemini" --geo US --range 1y
+./bin/ohmytrends get --source baidu --words "微信指数,google" --range 30d
 ```
 
 The CLI writes JSON to `--out` and prints a terminal summary table.
@@ -169,14 +169,14 @@ bun src/cli.ts get --source all --words "gemini" --format json
 
 ```bash
 bun src/cli.ts help
-./dist/ohmytrends help
+./bin/ohmytrends help
 ```
 
 Run without a command to open the Clack menu:
 
 ```bash
 bun src/cli.ts
-./dist/ohmytrends
+./bin/ohmytrends
 ```
 
 During development, the same interactive menu can be launched with:
@@ -318,7 +318,7 @@ Start the Bun + Elysia HTTP API server:
 
 ```bash
 bun src/cli.ts serve --host 127.0.0.1 --port 3000
-./dist/ohmytrends serve --host 127.0.0.1 --port 3000
+./bin/ohmytrends serve --host 127.0.0.1 --port 3000
 ```
 
 Open `http://127.0.0.1:3000` for a built-in client example page. It requests
@@ -351,8 +351,8 @@ First-time use may still require manual login. For server usage, initialize
 sessions before starting the API:
 
 ```bash
-./dist/ohmytrends login
-./dist/ohmytrends serve --port 3000
+./bin/ohmytrends login
+./bin/ohmytrends serve --port 3000
 ```
 
 Supported request fields match the CLI option names in camelCase:
@@ -803,7 +803,7 @@ Never commit or publish:
 - `profiles/`
 - `data/`
 - `exports/`
-- `dist/`
+- `bin/`
 - logs
 - `.env` files
 - custom browser profile directories

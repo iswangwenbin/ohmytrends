@@ -6,7 +6,7 @@ This document describes the machine-readable JSON emitted by:
 
 ```bash
 bun src/cli.ts get --format json
-./dist/ohmytrends get --format json
+./bin/ohmytrends get --format json
 ```
 
 In JSON mode, stdout and `--out` use the unified schema documented here. In the

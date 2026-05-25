@@ -6,7 +6,7 @@
 
 ```bash
 bun src/cli.ts get --format json
-./dist/ohmytrends get --format json
+./bin/ohmytrends get --format json
 ```
 
 在 JSON 模式下，stdout 和 `--out` 都使用本文档描述的统一 schema。默认 table 模式下，stdout 是人类可读表格，`--out` 会使用 table 视图所需的内部详细结构。
