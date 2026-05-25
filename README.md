@@ -789,6 +789,12 @@ Project structure:
 - `src/types.ts` shared data types.
 - `src/config.ts` defaults and URL builders.
 
+## Agent Skill
+
+Codex / agent skill support lives in the companion
+`ohmytrends-skills` repository. Keep this repository focused on the CLI, HTTP
+API, binaries, docs, and JSON schema.
+
 ## Privacy
 
 Browser profiles can contain cookies, sessions, local storage, and account data.

@@ -733,6 +733,10 @@ CI 会在 pull request 上运行类型检查和 Bun 测试。
 - `src/types.ts` 共享数据类型。
 - `src/config.ts` 默认值和 URL 构造。
 
+## Agent Skill
+
+Codex / agent skill 支持会放在配套的 `ohmytrends-skills` 仓库中。本仓库专注于 CLI、HTTP API、二进制、文档和 JSON schema。
+
 ## 隐私
 
 浏览器资料目录可能包含 cookies、会话、本地存储和账号数据。不要提交或发布：
