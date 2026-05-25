@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "source": "google",
+  "status": "ok",
+  "capturedAt": "2026-05-23T00:00:00.000Z",
+  "query": {
+    "keywords": ["gemini"],
+    "range": "30d",
+    "startDate": null,
+    "endDate": null,
+    "region": "US"
+  },
+  "results": [
+    {
+      "keyword": "gemini",
+      "status": "ok",
+      "search": {
+        "unit": "relative",
+        "average": 62,
+        "mobileAverage": null,
+        "points": [
+          {
+            "date": "2026-05-22",
+            "value": 94,
+            "pc": null,
+            "mobile": null
+          }
+        ],
+        "yearOverYear": null,
+        "monthOverMonth": null
+      },
+      "feed": null,
+      "relatedQueries": {
+        "top": [
+          {
+            "query": "gemini google",
+            "value": 100,
+            "label": "100"
+          }
+        ],
+        "rising": [
+          {
+            "query": "gemini cli",
+            "value": 5000,
+            "label": "Breakout"
+          }
+        ]
+      },
+      "message": null
+    }
+  ],
+  "messages": [],
+  "sourceMeta": {
+    "sourceUrl": "https://trends.google.com/trends/explore?date=today+1-m&geo=US&q=gemini",
+    "apiUrls": {
+      "main": "https://trends.google.com/trends/api/widgetdata/multiline?token=%5Bredacted%5D"
+    }
+  }
+}

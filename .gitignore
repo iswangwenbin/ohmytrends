@@ -1,0 +1,25 @@
+node_modules/
+dist/
+exports/
+logs/
+*.log
+*.tgz
+.DS_Store
+
+# Browser profiles may contain cookies, sessions, local storage, and account data.
+data/
+profiles/
+*-profile/
+*-profile-*/
+*-google/
+smoke-profile-*/
+
+# Chromium lock files.
+SingletonCookie
+SingletonLock
+SingletonSocket
+
+# Local environment.
+.env
+.env.*
+!.env.example

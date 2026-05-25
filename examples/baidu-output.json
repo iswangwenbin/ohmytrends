@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "source": "baidu",
+  "status": "partial",
+  "capturedAt": "2026-05-23T00:00:00.000Z",
+  "query": {
+    "keywords": ["微信指数", "百度指数abc"],
+    "range": "30d",
+    "startDate": "2026-04-23",
+    "endDate": "2026-05-22",
+    "region": "0"
+  },
+  "results": [
+    {
+      "keyword": "微信指数",
+      "status": "ok",
+      "search": {
+        "unit": "index",
+        "average": 187,
+        "mobileAverage": 68,
+        "points": [
+          {
+            "date": "2026-05-22",
+            "value": 180,
+            "pc": 112,
+            "mobile": 68
+          }
+        ],
+        "yearOverYear": {
+          "percent": -25,
+          "direction": "down"
+        },
+        "monthOverMonth": {
+          "percent": -8,
+          "direction": "down"
+        }
+      },
+      "feed": {
+        "unit": "index",
+        "average": 43,
+        "mobileAverage": null,
+        "points": [
+          {
+            "date": "2026-05-22",
+            "value": 41,
+            "pc": null,
+            "mobile": null
+          }
+        ],
+        "yearOverYear": null,
+        "monthOverMonth": null
+      },
+      "relatedQueries": null,
+      "message": null
+    },
+    {
+      "keyword": "百度指数abc",
+      "status": "unavailable",
+      "search": {
+        "unit": "index",
+        "average": 0,
+        "mobileAverage": 0,
+        "points": [],
+        "yearOverYear": null,
+        "monthOverMonth": null
+      },
+      "feed": {
+        "unit": "index",
+        "average": 0,
+        "mobileAverage": 0,
+        "points": [],
+        "yearOverYear": null,
+        "monthOverMonth": null
+      },
+      "relatedQueries": null,
+      "message": "关键词未被百度指数收录"
+    }
+  ],
+  "messages": ["1 个关键词不可用或未收录"],
+  "sourceMeta": {
+    "sourceUrl": "https://index.baidu.com/v2/main/index.html#/trend/%E5%BE%AE%E4%BF%A1%E6%8C%87%E6%95%B0?words=%E5%BE%AE%E4%BF%A1%E6%8C%87%E6%95%B0%2C%E7%99%BE%E5%BA%A6%E6%8C%87%E6%95%B0abc",
+    "apiUrls": {
+      "search": "/api/SearchApi/index?...",
+      "feed": "/api/FeedSearchApi/getFeedIndex?..."
+    }
+  }
+}

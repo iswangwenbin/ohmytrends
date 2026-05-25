@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ohmytrends/ohmytrends/schemas/unified-output.schema.json",
+  "title": "ohmytrends unified JSON output",
+  "description": "Unified JSON output emitted by ohmytrends get --format json.",
+  "oneOf": [
+    { "$ref": "#/$defs/UnifiedOutput" },
+    { "$ref": "#/$defs/UnifiedMultiSourceOutput" }
+  ],
+  "$defs": {
+    "Status": {
+      "type": "string",
+      "enum": ["ok", "partial", "no_data", "error"]
+    },
+    "KeywordStatus": {
+      "type": "string",
+      "enum": ["ok", "no_data", "unavailable", "error"]
+    },
+    "Source": {
+      "type": "string",
+      "enum": ["baidu", "google"]
+    },
+    "DateOrNull": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        { "type": "null" }
+      ]
+    },
+    "UnifiedOutput": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "source",
+        "status",
+        "capturedAt",
+        "query",
+        "results",
+        "messages",
+        "sourceMeta"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "source": { "$ref": "#/$defs/Source" },
+        "status": { "$ref": "#/$defs/Status" },
+        "capturedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "query": { "$ref": "#/$defs/SingleSourceQuery" },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/KeywordResult" }
+        },
+        "messages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sourceMeta": { "$ref": "#/$defs/SourceMeta" },
+        "raw": true
+      }
+    },
+    "UnifiedMultiSourceOutput": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "source",
+        "status",
+        "capturedAt",
+        "query",
+        "results",
+        "messages"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "source": { "const": "all" },
+        "status": { "$ref": "#/$defs/Status" },
+        "capturedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "query": { "$ref": "#/$defs/MultiSourceQuery" },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UnifiedOutput" }
+        },
+        "messages": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "SingleSourceQuery": {
+      "type": "object",
+      "required": ["keywords", "range", "startDate", "endDate", "region"],
+      "additionalProperties": true,
+      "properties": {
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "range": { "$ref": "#/$defs/Range" },
+        "startDate": { "$ref": "#/$defs/DateOrNull" },
+        "endDate": { "$ref": "#/$defs/DateOrNull" },
+        "region": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "MultiSourceQuery": {
+      "type": "object",
+      "required": ["keywords", "range", "startDate", "endDate"],
+      "additionalProperties": true,
+      "properties": {
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "range": { "$ref": "#/$defs/Range" },
+        "startDate": { "$ref": "#/$defs/DateOrNull" },
+        "endDate": { "$ref": "#/$defs/DateOrNull" }
+      }
+    },
+    "Range": {
+      "type": "string",
+      "enum": ["1h", "4h", "1d", "7d", "30d", "90d", "180d", "1y", "5y", "all", "custom"]
+    },
+    "KeywordResult": {
+      "type": "object",
+      "required": ["keyword", "status", "search", "feed", "relatedQueries", "message"],
+      "additionalProperties": true,
+      "properties": {
+        "keyword": { "type": "string" },
+        "status": { "$ref": "#/$defs/KeywordStatus" },
+        "search": {
+          "anyOf": [
+            { "$ref": "#/$defs/Metric" },
+            { "type": "null" }
+          ]
+        },
+        "feed": {
+          "anyOf": [
+            { "$ref": "#/$defs/Metric" },
+            { "type": "null" }
+          ]
+        },
+        "relatedQueries": {
+          "anyOf": [
+            { "$ref": "#/$defs/RelatedQueries" },
+            { "type": "null" }
+          ]
+        },
+        "message": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "Metric": {
+      "type": "object",
+      "required": ["unit", "average", "mobileAverage", "points"],
+      "additionalProperties": true,
+      "properties": {
+        "unit": {
+          "type": "string",
+          "enum": ["relative", "index"]
+        },
+        "average": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "mobileAverage": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Point" }
+        },
+        "yearOverYear": {
+          "anyOf": [
+            { "$ref": "#/$defs/Change" },
+            { "type": "null" }
+          ]
+        },
+        "monthOverMonth": {
+          "anyOf": [
+            { "$ref": "#/$defs/Change" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "Point": {
+      "type": "object",
+      "required": ["date", "value", "pc", "mobile"],
+      "additionalProperties": true,
+      "properties": {
+        "date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "value": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "pc": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "mobile": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "Change": {
+      "type": "object",
+      "required": ["percent", "direction"],
+      "additionalProperties": true,
+      "properties": {
+        "percent": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["up", "down", "flat"]
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "RelatedQueries": {
+      "type": "object",
+      "required": ["top", "rising"],
+      "additionalProperties": true,
+      "properties": {
+        "top": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RelatedQuery" }
+        },
+        "rising": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RelatedQuery" }
+        }
+      }
+    },
+    "RelatedQuery": {
+      "type": "object",
+      "required": ["query", "value", "label"],
+      "additionalProperties": true,
+      "properties": {
+        "query": { "type": "string" },
+        "value": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "label": { "type": "string" },
+        "link": { "type": "string" }
+      }
+    },
+    "SourceMeta": {
+      "type": "object",
+      "required": ["sourceUrl", "apiUrls"],
+      "additionalProperties": true,
+      "properties": {
+        "sourceUrl": { "type": "string" },
+        "apiUrls": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}
