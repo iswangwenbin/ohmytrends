@@ -39,63 +39,71 @@
 
 ```bash
 bun install
+```
+
+可选本地检查：
+
+```bash
 bun run ci
 ```
 
-## 构建二进制
+## 快速开始
 
-构建本地可执行文件：
+先登录一次。缺少登录状态时会自动打开可视浏览器：
+
+```bash
+bun src/cli.ts login
+```
+
+查询 Google Trends 和百度指数。`--source all` 和 `--range 30d` 是默认值：
+
+```bash
+bun src/cli.ts get --words "gemini,claude"
+```
+
+把统一 JSON 打印到 stdout：
+
+```bash
+bun src/cli.ts get --words "gemini,claude" --format json
+```
+
+启动本地 HTTP API：
+
+```bash
+bun src/cli.ts serve
+```
+
+请求 API：
+
+```bash
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
+```
+
+## 常用示例
+
+只查 Google：
+
+```bash
+bun src/cli.ts get --source google --words "gemini" --geo US --range 1y
+```
+
+只查百度：
+
+```bash
+bun src/cli.ts get --source baidu --words "微信指数,google" --range 30d
+```
+
+构建本地二进制：
 
 ```bash
 bun run build
-./bin/ohmytrends help
+./bin/ohmytrends get --words "gemini,claude"
 ```
 
-构建脚本使用 Bun 的单文件可执行模式：
-
-```bash
-bun build ./src/cli.ts --compile --minify --external chromium-bidi --outfile ./bin/ohmytrends
-```
-
-`--minify` 会做轻量代码压缩。`--external chromium-bidi` 用于避开 Playwright 可选 BiDi bundle 的构建期深层导入解析问题。
-
-生成的可执行文件包含 Bun runtime 和项目代码，但不包含你的浏览器资料目录、cookies、登录状态、输出文件或 Chromium 缓存。
-
-### 使用构建后的二进制
-
-执行 `bun run build` 后，可以像开发时使用 `bun src/cli.ts` 一样使用
-`./bin/ohmytrends`：
-
-```bash
-./bin/ohmytrends help
-./bin/ohmytrends login
-./bin/ohmytrends logout google
-./bin/ohmytrends get --words "gemini,claude" --format json
-```
-
-第一次使用仍然需要手工登录。先运行二进制登录命令，在打开的可视浏览器中完成登录，认证会话会保存到持久化 profile 目录：
+生成的可执行文件包含 Bun runtime 和项目代码，但不包含你的浏览器资料目录、cookies、输出文件或 Chromium 缓存。第一次使用仍然需要手工登录：
 
 ```bash
 ./bin/ohmytrends login
-```
-
-默认 `--source all` 会把会话分别保存到：
-
-- `profiles/baidu`
-- `profiles/google`
-
-二进制的输出路径相对于你运行命令时所在的当前目录。例如下面的命令会在当前目录下写入 `exports/ohmytrends.json`：
-
-```bash
-./bin/ohmytrends get --words "gemini" --format json
-```
-
-也可以把构建后的二进制放到 `PATH` 中：
-
-```bash
-mkdir -p ~/.local/bin
-cp ./bin/ohmytrends ~/.local/bin/ohmytrends
-ohmytrends help
 ```
 
 如果需要调试可视浏览器会话：
@@ -104,53 +112,7 @@ ohmytrends help
 ./bin/ohmytrends get --source google --words "gemini" --headless false --keep-open true
 ```
 
-## 快速开始
-
-先登录一次：
-
-```bash
-bun src/cli.ts login --source google
-bun src/cli.ts login --source baidu
-```
-
-采集 Google Trends：
-
-```bash
-bun src/cli.ts get --source google --words "gemini" --geo US --range 1y
-```
-
-采集百度指数：
-
-```bash
-bun src/cli.ts get --source baidu --words "微信指数,google" --range 30d
-```
-
-同时采集两个数据源：
-
-```bash
-bun src/cli.ts get --source all --words "gemini,claude" --range 30d --format json
-```
-
-`--source all` 和 `--range 30d` 是默认值，所以上面的命令也等价于：
-
-```bash
-bun src/cli.ts get --words "gemini,claude" --format json
-```
-
-使用构建后的二进制：
-
-```bash
-./bin/ohmytrends get --source google --words "gemini" --geo US --range 1y
-./bin/ohmytrends get --source baidu --words "微信指数,google" --range 30d
-```
-
 CLI 会把 JSON 写入 `--out`，并在终端打印摘要表格。
-
-如果需要机器可读的 stdout：
-
-```bash
-bun src/cli.ts get --source all --words "gemini" --format json
-```
 
 ## 命令
 

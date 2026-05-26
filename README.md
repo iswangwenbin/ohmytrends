@@ -45,70 +45,74 @@ controls.
 
 ```bash
 bun install
+```
+
+Optional local check:
+
+```bash
 bun run ci
 ```
 
-## Build A Binary
+## Quick Start
 
-Build a local executable:
+Log in once. The command opens a visible browser when login is needed:
+
+```bash
+bun src/cli.ts login
+```
+
+Query both Google Trends and Baidu Index. `--source all` and `--range 30d` are
+the defaults:
+
+```bash
+bun src/cli.ts get --words "gemini,claude"
+```
+
+Print unified JSON to stdout:
+
+```bash
+bun src/cli.ts get --words "gemini,claude" --format json
+```
+
+Start the local HTTP API:
+
+```bash
+bun src/cli.ts serve
+```
+
+Query the API:
+
+```bash
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
+```
+
+## Common Examples
+
+Google only:
+
+```bash
+bun src/cli.ts get --source google --words "gemini" --geo US --range 1y
+```
+
+Baidu only:
+
+```bash
+bun src/cli.ts get --source baidu --words "微信指数,google" --range 30d
+```
+
+Build a local binary:
 
 ```bash
 bun run build
-./bin/ohmytrends help
+./bin/ohmytrends get --words "gemini,claude"
 ```
 
-The build script uses Bun's single-file executable mode:
-
-```bash
-bun build ./src/cli.ts --compile --minify --external chromium-bidi --outfile ./bin/ohmytrends
-```
-
-`--minify` provides lightweight code minification. The `--external
-chromium-bidi` flag avoids a compile-time deep-import resolution issue in
-Playwright's optional BiDi bundle.
-
-The executable includes the Bun runtime and project code. It does not include
-your browser profile, cookies, login state, output files, or Chromium cache.
-
-### Using The Built Binary
-
-After `bun run build`, use `./bin/ohmytrends` the same way you use
-`bun src/cli.ts` during development:
-
-```bash
-./bin/ohmytrends help
-./bin/ohmytrends login
-./bin/ohmytrends logout google
-./bin/ohmytrends get --words "gemini,claude" --format json
-```
-
-First-time use still requires manual login. Run the binary login command once,
-complete login in the visible browser, and the authenticated session will be
-stored in the persistent profile directories:
+The built binary is self-contained, but it does not include your browser
+profile, cookies, output files, or Chromium cache. First-time use still requires
+manual login:
 
 ```bash
 ./bin/ohmytrends login
-```
-
-By default, `--source all` stores sessions under:
-
-- `profiles/baidu`
-- `profiles/google`
-
-The binary writes output paths relative to the directory where you run it. For
-example, this writes `exports/ohmytrends.json` under the current working
-directory:
-
-```bash
-./bin/ohmytrends get --words "gemini" --format json
-```
-
-You can also place the built binary on your `PATH`:
-
-```bash
-mkdir -p ~/.local/bin
-cp ./bin/ohmytrends ~/.local/bin/ohmytrends
-ohmytrends help
 ```
 
 For debugging a visible browser session:
@@ -117,53 +121,7 @@ For debugging a visible browser session:
 ./bin/ohmytrends get --source google --words "gemini" --headless false --keep-open true
 ```
 
-## Quick Start
-
-Log in once:
-
-```bash
-bun src/cli.ts login --source google
-bun src/cli.ts login --source baidu
-```
-
-Collect Google Trends:
-
-```bash
-bun src/cli.ts get --source google --words "gemini" --geo US --range 1y
-```
-
-Collect Baidu Index:
-
-```bash
-bun src/cli.ts get --source baidu --words "微信指数,google" --range 30d
-```
-
-Collect both sources:
-
-```bash
-bun src/cli.ts get --source all --words "gemini,claude" --range 30d --format json
-```
-
-`--source all` and `--range 30d` are the defaults, so this is equivalent:
-
-```bash
-bun src/cli.ts get --words "gemini,claude" --format json
-```
-
-Use the built binary:
-
-```bash
-./bin/ohmytrends get --source google --words "gemini" --geo US --range 1y
-./bin/ohmytrends get --source baidu --words "微信指数,google" --range 30d
-```
-
 The CLI writes JSON to `--out` and prints a terminal summary table.
-
-For machine-readable stdout, use:
-
-```bash
-bun src/cli.ts get --source all --words "gemini" --format json
-```
 
 ## Commands
 
