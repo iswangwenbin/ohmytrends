@@ -10,6 +10,7 @@ logs/
 # Browser profiles may contain cookies, sessions, local storage, and account data.
 data/
 profiles/
+profiles.bak/
 *-profile/
 *-profile-*/
 *-google/

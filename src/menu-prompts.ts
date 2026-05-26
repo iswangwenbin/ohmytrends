@@ -204,16 +204,20 @@ async function runTerminalQueryPrompts(lang: TerminalLanguage): Promise<MenuActi
     if (format === "exit") return "done";
     if (format === "back") return "back";
 
-    while (true) {
-      const action = await runTerminalQueryPromptOnce({
-        source,
-        range,
-        geo: geoValue,
-        format,
-      });
-      if (action === "continue") continue;
-      if (action === "back") break;
-      return "done";
+    try {
+      while (true) {
+        const action = await runTerminalQueryPromptOnce({
+          source,
+          range,
+          geo: geoValue,
+          format,
+        });
+        if (action === "continue") continue;
+        if (action === "back") break;
+        return "done";
+      }
+    } finally {
+      await closeKeptOpenContexts();
     }
   }
 }
@@ -248,7 +252,6 @@ async function runTerminalQueryPromptOnce(defaults: {
 }): Promise<TerminalQueryPromptAction> {
   const lang = readLanguage();
   const copy = menuCopy(lang);
-  await closeKeptOpenContexts();
   const { value: wordsValue, cancelKey } = await withPromptCancelKey(() => text({
     message: copy.keywordPrompt,
     placeholder: copy.keywordPlaceholder,
@@ -277,6 +280,7 @@ async function runTerminalQueryPromptOnce(defaults: {
     return "exit";
   }
 
+  await closeKeptOpenContexts();
   await runTerminalQuery(
     buildTerminalQueryArgs({
       words: wordsValue,

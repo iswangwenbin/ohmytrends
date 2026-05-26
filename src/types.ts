@@ -2,6 +2,7 @@ export type Source = "baidu" | "google";
 export type SourceOption = Source | "all";
 export type OutputFormat = "table" | "json";
 export type TerminalLanguage = "zh" | "en";
+export type BaiduCollectMode = "page" | "api";
 
 export type SearchIndexResponse = {
   status?: number;
@@ -121,6 +122,7 @@ export type Options = {
   days?: number;
   range?: string;
   rangeLabel?: string;
+  baiduMode: BaiduCollectMode;
   geo: string;
   area: string;
   onStatus?: (message: string) => void;
@@ -133,17 +135,25 @@ export type BrowserContextLike = {
   cookies(urls?: string[]): Promise<{ name: string; value: string }[]>;
   pages(): PageLike[];
   addInitScript?(callback: (...args: any[]) => any, arg?: unknown): Promise<unknown>;
-  on?(event: "page", callback: (page: PageLike) => void | Promise<void>): void;
+  exposeBinding?(
+    name: string,
+    callback: (source: { page?: PageLike }, payload?: unknown) => unknown | Promise<unknown>,
+  ): Promise<unknown>;
+  on?(event: string, callback: (...args: any[]) => void | Promise<void>): void;
 };
 
 export type PageLike = {
   url(): string;
   isClosed?(): boolean;
-  on(event: "response", callback: (response: ResponseLike) => void | Promise<void>): void;
+  on(event: string, callback: (...args: any[]) => void | Promise<void>): void;
   route(url: string, callback: (route: RouteLike) => void | Promise<void>): Promise<unknown>;
   addInitScript(callback: (...args: any[]) => any, arg?: unknown): Promise<unknown>;
   goto(url: string, options?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
   waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>;
+  waitForResponse?(
+    predicate: (response: ResponseLike) => boolean | Promise<boolean>,
+    options?: { timeout?: number },
+  ): Promise<ResponseLike>;
   waitForTimeout(timeout: number): Promise<void>;
   waitForLoadState(state: "domcontentloaded" | "networkidle", options?: { timeout?: number }): Promise<void>;
   mouse: {
@@ -167,6 +177,8 @@ declare global {
   interface Window {
     __ohmytrendsSetStatus?: (text: string) => void;
     __ohmytrendsStatusOverlay?: { render(text: string): void };
+    __ohmytrendsShowBaiduLoginGuide?: (message?: string) => void;
+    __ohmytrendsHideBaiduLoginGuide?: () => void;
   }
 }
 

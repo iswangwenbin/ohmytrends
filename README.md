@@ -283,6 +283,7 @@ Main options:
 | `--end-date YYYY-MM-DD` | Both | Source-specific | Custom range end. |
 | `--range 1h|4h|1d|7d|30d|90d|180d|1y|5y|all` | Both | `30d` | Unified source-neutral range. |
 | `--area 0` | Baidu | `0` | Baidu area code. |
+| `--baidu-mode page|api` | Baidu | `page` | Baidu collection mode. `page` simulates page input/clicks and captures normal page responses; `api` tries the faster direct API path first and falls back to page collection. |
 | `--geo US` | Google | Global | Google Trends geographic region. |
 | `--lang en|zh` | Both | System locale | Terminal language. |
 
@@ -484,6 +485,23 @@ bun src/cli.ts get --source baidu --words "微信指数" --out exports/baidu-ind
 
 ```bash
 bun src/cli.ts get --source baidu --words "微信指数,google"
+```
+
+### Collection Mode
+
+Baidu defaults to `--baidu-mode page`. Page mode behaves like a manual user: it
+opens Baidu Index, types the keywords, clicks search, and captures the responses
+produced by the page. This is slower than direct API access but is usually less
+likely to trigger Baidu's abnormal-access warning.
+
+```bash
+bun src/cli.ts get --source baidu --words "微信指数,google" --baidu-mode page
+```
+
+Use `api` only when you explicitly want the faster direct API path:
+
+```bash
+bun src/cli.ts get --source baidu --words "微信指数,google" --baidu-mode api
 ```
 
 If Baidu reports that a keyword is not indexed, the CLI:

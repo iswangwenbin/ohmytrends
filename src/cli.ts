@@ -131,6 +131,7 @@ function printHelp(lang: TerminalLanguage): void {
   get [--source baidu|google|all] [--words codex,claude] [--url URL] [--out exports/ohmytrends.json]
           [--profile-dir profiles/baidu|profiles/google] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]
           [--range 30d] [--geo US] [--area 0]
+          [--baidu-mode page|api]
           [--format table|json] [--headless false] [--keep-open true] [--login-timeout-ms 300000]
           [--lang zh|en]
 
@@ -152,6 +153,7 @@ function printHelp(lang: TerminalLanguage): void {
   logout 沿用 login 的 profile-dir 行为，并清理已保存的浏览器会话。
   Google Trends 每次最多支持 5 个对比关键词。
   可用 --range 1h|4h|1d|7d|30d|90d|180d|1y|5y|all 表示统一时间范围。
+  百度默认使用 --baidu-mode page，通过页面模拟输入和点击采集；需要接口快路径时可设为 api。
   可用 --format json 输出适合程序读取的数据。
   可用 --lang zh|en 切换终端语言。
 
@@ -170,6 +172,7 @@ Commands:
   get [--source baidu|google|all] [--words codex,claude] [--url URL] [--out exports/ohmytrends.json]
           [--profile-dir profiles/baidu|profiles/google] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]
           [--range 30d] [--geo US] [--area 0]
+          [--baidu-mode page|api]
           [--format table|json] [--headless false] [--keep-open true] [--login-timeout-ms 300000]
           [--lang zh|en]
 
@@ -191,6 +194,7 @@ Notes:
   logout follows the same profile-dir behavior as login and removes saved browser sessions.
   Google Trends supports up to 5 comparison keywords in one request.
   Use --range 1h|4h|1d|7d|30d|90d|180d|1y|5y|all for a source-neutral range.
+  Baidu defaults to --baidu-mode page, which uses page input/click simulation. Use api for the faster direct API path.
   Use --format json for machine-readable stdout.
   Use --lang zh|en to switch terminal language.
 

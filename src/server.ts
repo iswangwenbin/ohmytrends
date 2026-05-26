@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import tailwindCss from "./generated/tailwind.css" with { type: "text" };
 import { readLanguage } from "./i18n.js";
 import { runtimeInfo } from "./logger.js";
 import { readFlag, readOptions } from "./options.js";
@@ -20,6 +21,7 @@ type ApiRequest = {
   timeoutMs?: number;
   loginTimeoutMs?: number;
   lang?: TerminalLanguage;
+  baiduMode?: string;
 };
 
 export async function startServer(args: string[]): Promise<void> {
@@ -107,6 +109,7 @@ function argsFromRequest(input: ApiRequest | Record<string, unknown>): string[] 
   pushNumber(args, "--timeout-ms", input.timeoutMs);
   pushNumber(args, "--login-timeout-ms", input.loginTimeoutMs);
   pushString(args, "--lang", input.lang);
+  pushString(args, "--baidu-mode", input.baiduMode);
   return args;
 }
 
@@ -179,26 +182,7 @@ function renderExamplePage(): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ohmytrends API Example</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            paper: "#f4f2ed",
-            ink: "#171717",
-            muted: "#68645f",
-            line: "#222222",
-            wash: "#e7e2d8"
-          },
-          fontFamily: {
-            mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
-            serif: ["Georgia", "Times New Roman", "serif"]
-          }
-        }
-      }
-    };
-  </script>
+  <style>${tailwindCss}</style>
 </head>
 <body class="min-h-screen bg-paper text-ink antialiased">
   <main class="mx-auto min-h-screen w-full max-w-[1720px] px-4 py-3 sm:px-6">

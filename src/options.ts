@@ -8,7 +8,7 @@ import {
   DEFAULT_WORDS,
 } from "./config.js";
 import { readLanguage } from "./i18n.js";
-import type { Options, OutputFormat, Source, SourceOption } from "./types.js";
+import type { BaiduCollectMode, Options, OutputFormat, Source, SourceOption } from "./types.js";
 
 const DEFAULT_RANGE = "30d";
 const VALID_RANGES = ["1h", "4h", "1d", "7d", "30d", "90d", "180d", "1y", "5y", "all"] as const;
@@ -57,9 +57,16 @@ export function readOptions(args: string[]): Options {
     days: dateOptions.days,
     range: readGoogleRange(args, explicitDateOptions),
     rangeLabel,
+    baiduMode: readBaiduCollectMode(args),
     geo: readFlag(args, "--geo") || "",
     area: readFlag(args, "--area") || "0",
   };
+}
+
+function readBaiduCollectMode(args: string[]): BaiduCollectMode {
+  const mode = readFlag(args, "--baidu-mode") || process.env.OHMYTRENDS_BAIDU_MODE || "page";
+  if (mode === "page" || mode === "api") return mode;
+  throw new Error(`Invalid --baidu-mode: ${mode}. Expected page or api`);
 }
 
 function readOutputFormat(args: string[]): OutputFormat {

@@ -43,6 +43,15 @@ describe("HTTP API", () => {
     expect(body.message).toContain("Invalid --range");
   });
 
+  test("validates Baidu collection mode before collection", async () => {
+    const app = createServer();
+    const response = await app.handle(new Request("http://localhost/api/trends?source=baidu&baiduMode=fast"));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.status).toBe("error");
+    expect(body.message).toContain("Invalid --baidu-mode");
+  });
+
   test("rejects explicitly empty keywords before collection", async () => {
     const app = createServer();
     const response = await app.handle(new Request("http://localhost/api/trends?words="));

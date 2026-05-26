@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@source "./**/*.ts";
+
+@theme {
+  --color-paper: #f4f2ed;
+  --color-ink: #171717;
+  --color-muted: #68645f;
+  --color-line: #222222;
+  --color-wash: #e7e2d8;
+
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-serif: Georgia, "Times New Roman", serif;
+}

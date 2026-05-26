@@ -60,6 +60,13 @@ describe("readOptions", () => {
     expect(options.out).toBe("exports/ohmytrends.json");
     expect(options.words).toEqual(["a", "b"]);
     expect(options.rangeLabel).toBe("30d");
+    expect(options.baiduMode).toBe("page");
+  });
+
+  test("reads Baidu collection mode", () => {
+    expect(readOptions(["--source", "baidu"]).baiduMode).toBe("page");
+    expect(readOptions(["--source", "baidu", "--baidu-mode", "api"]).baiduMode).toBe("api");
+    expect(() => readOptions(["--source", "baidu", "--baidu-mode", "fast"])).toThrow("Invalid --baidu-mode");
   });
 
   test("reads dev browser mode defaults from environment variables", () => {

@@ -6,8 +6,11 @@ import {
   googleRelatedQueriesFromResponse,
   googleTimelineToTrends,
   redactGoogleApiUrl,
+  selectActiveGoogleLoginPage,
   stripGoogleJsonPrefix,
 } from "../src/google.js";
+import { loginWindowClosedMessage } from "../src/browser-utils.js";
+import type { BrowserContextLike, PageLike } from "../src/types.js";
 
 describe("Google Trends helpers", () => {
   test("strips Google's JSON prefix", () => {
@@ -81,5 +84,13 @@ describe("Google Trends helpers", () => {
   test("finds Google widgets with suffixed ids", () => {
     expect(findGoogleWidget([{ id: "RELATED_QUERIES_0", token: "token", request: {} }], "RELATED_QUERIES")?.token)
       .toBe("token");
+  });
+
+  test("does not treat unrelated blank pages as an active Google login window", () => {
+    const closedLoginPage = { isClosed: () => true, url: () => "https://accounts.google.com/" } as PageLike;
+    const blankPage = { isClosed: () => false, url: () => "about:blank" } as PageLike;
+    const context = { pages: () => [blankPage] } as BrowserContextLike;
+
+    expect(() => selectActiveGoogleLoginPage(context, closedLoginPage)).toThrow(loginWindowClosedMessage("Google"));
   });
 });

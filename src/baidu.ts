@@ -1,15 +1,18 @@
 import { launchPersistentContext } from "cloakbrowser";
 import {
+  assertBrowserSessionAlive,
   assertLoginWindowOpen,
   closeContextSafely,
   evaluateWithNavigationRetry,
   hasCookieInProfile,
   hasOpenPages,
+  installBrowserSessionBridge,
   installContextStatusOverlay,
   isTargetClosedError,
   keepContextOpenUntilExit,
   loginWindowClosedMessage,
   readJsonResponse,
+  setBaiduLoginGuide,
   setContextStatus,
   setPageStatus,
   waitForPageSettled,
@@ -26,6 +29,7 @@ import type {
   Options,
   OverviewRow,
   PageLike,
+  ResponseLike,
   RawFeedIndexGroup,
   RawIndexGroup,
   RawSearchIndexGroup,
@@ -71,6 +75,7 @@ export async function loginBaidu(options: Options): Promise<void> {
   });
   contextStatusHandlers.set(browser, (message) => emitStatus(options, message));
   if (options.quietStatus) contextQuietStatus.add(browser);
+  await installBrowserSessionBridge(browser);
   await installContextStatusOverlay(browser, true, "正在准备百度登录...");
 
   try {
@@ -92,10 +97,15 @@ export async function loginBaidu(options: Options): Promise<void> {
     }
     logStatus(options, "请在打开的浏览器里登录百度...");
     emitStatus(options, "请在打开的浏览器里登录百度...");
-    await waitForBaiduLogin(browser, page, options.loginTimeoutMs, true);
+    await setBaiduLoginGuide(page, true);
+    try {
+      await waitForBaiduLogin(browser, page, options.loginTimeoutMs, true);
+    } finally {
+      await setBaiduLoginGuide(page, false);
+    }
   } finally {
-    if (options.keepOpen && !options.headless) {
-      runtimeInfo("已设置 --keep-open true，保留百度浏览器窗口。");
+    if (options.keepOpen && !options.headless && hasOpenPages(browser)) {
+      keepContextOpenUntilExit(browser, "已设置 --keep-open true，保留百度浏览器窗口。");
     } else {
       await closeContextSafely(browser);
     }
@@ -123,16 +133,13 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
     search: [],
     feed: [],
   };
+  const responseCaptureTasks = new Set<Promise<void>>();
 
   try {
     const page = await browser.newPage();
     await setPageStatus(page, !options.headless, "正在打开百度指数...");
-    page.on("response", async (response) => {
-      const url = response.url();
-      const kind = baiduApiKindFromUrl(url);
-      if (!kind) return;
-      const json = await readJsonResponse<SearchIndexResponse>(response);
-      if (json && rawIndexes(json).length) intercepted[kind]?.push(json);
+    page.on("response", (response) => {
+      queueBaiduResponseCapture(response, intercepted, responseCaptureTasks);
     });
 
     await page.goto(DEFAULT_HOME_URL, {
@@ -147,7 +154,9 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
     }
     await ensureLoggedIn(browser, page, options);
 
-    const apiFirstOutput = await tryCollectBaiduIndexFromApi(page, browser, options, intercepted);
+    const apiFirstOutput = options.baiduMode === "api"
+      ? await tryCollectBaiduIndexFromApi(page, browser, options, intercepted)
+      : undefined;
     if (apiFirstOutput) return apiFirstOutput;
 
     if (page.url().includes("#/trend")) {
@@ -158,12 +167,21 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
       await page.waitForSelector("body", { timeout: options.timeoutMs });
     }
     await setPageStatus(page, !options.headless, `正在查询百度指数：${options.words.join(", ")}`);
+    const initialApiResponses = waitForBaiduApiResponses(
+      page,
+      ["search", "feed"],
+      options.timeoutMs,
+      intercepted,
+      responseCaptureTasks,
+    );
     await submitHomeSearch(page, options);
     await protectBaiduIndexRoute(page, options.url);
     await lockBaiduIndexRoute(page, options.url);
     await setPageStatus(page, !options.headless, "正在等待百度指数趋势页...");
     await waitForIndexPage(page, options.loginTimeoutMs);
     await page.waitForTimeout(500);
+    await initialApiResponses;
+    await flushBaiduResponseCaptures(responseCaptureTasks);
     let unavailableWords = await detectUnavailableWords(page, options.words);
     if (unavailableWords.length > 0) {
       const message = unavailableWordsMessage(unavailableWords);
@@ -179,16 +197,26 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
           !options.headless,
           `已剔除未收录词，正在重新查询：${unavailableWords.join(", ")}`,
         );
+        const retryApiResponses = waitForBaiduApiResponses(
+          page,
+          ["search", "feed"],
+          options.timeoutMs,
+          intercepted,
+          responseCaptureTasks,
+        );
         await page.goto(retryOptions.url, {
           waitUntil: "domcontentloaded",
           timeout: options.timeoutMs,
         });
         await waitForIndexPage(page, options.loginTimeoutMs);
         await page.waitForTimeout(500);
+        await retryApiResponses;
+        await flushBaiduResponseCaptures(responseCaptureTasks);
       }
     }
 
     await setPageStatus(page, !options.headless, "正在提取百度搜索指数数据...");
+    await flushBaiduResponseCaptures(responseCaptureTasks);
     let effectiveOptions = options;
     let overviewResult = await extractBaiduOverviews(page, effectiveOptions.words);
     if (!overviewResult.search.found && unavailableWords.length === 0 && options.words.length > 1) {
@@ -203,12 +231,21 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
           effectiveOptions = retryOptions;
           intercepted.search = [];
           intercepted.feed = [];
+          const retryApiResponses = waitForBaiduApiResponses(
+            page,
+            ["search", "feed"],
+            options.timeoutMs,
+            intercepted,
+            responseCaptureTasks,
+          );
           await page.goto(retryOptions.url, {
             waitUntil: "domcontentloaded",
             timeout: options.timeoutMs,
           });
           await waitForIndexPage(page, options.loginTimeoutMs);
           await page.waitForTimeout(500);
+          await retryApiResponses;
+          await flushBaiduResponseCaptures(responseCaptureTasks);
           overviewResult = await extractBaiduOverviews(page, retryOptions.words);
         }
       }
@@ -216,17 +253,23 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
     const searchOverview = overviewResult.search.rows;
     const feedOverview = overviewResult.feed.rows;
     const noDataReason = overviewResult.search.found ? undefined : "Search overview data structure not found";
-    const searchResult = noDataReason
-      ? emptyBaiduSection("search", effectiveOptions, searchOverview, noDataReason)
-      : await collectTrendData(page, effectiveOptions, "search", intercepted.search || [], searchOverview);
-    await setPageStatus(page, !options.headless, "正在采集百度资讯指数数据...");
-    const feedResult = await collectTrendData(
-      page,
-      effectiveOptions,
-      "feed",
-      intercepted.feed || [],
-      feedOverview,
-    );
+    await setPageStatus(page, !options.headless, "正在采集百度搜索指数和资讯指数数据...");
+    const [searchResult, feedResult] = await Promise.all([
+      noDataReason
+        ? Promise.resolve(emptyBaiduSection("search", effectiveOptions, searchOverview, noDataReason))
+        : collectTrendData(page, effectiveOptions, "search", intercepted.search || [], searchOverview, {
+          allowDirectApi: false,
+          allowFallbackApi: true,
+        }),
+      collectTrendData(
+        page,
+        effectiveOptions,
+        "feed",
+        intercepted.feed || [],
+        feedOverview,
+        { allowDirectApi: false, allowFallbackApi: true },
+      ),
+    ]);
     await setPageStatus(
       page,
       !options.headless,
@@ -287,8 +330,12 @@ async function tryCollectBaiduIndexFromApi(
     await waitForPageSettled(page);
 
     const [searchResult, feedResult] = await Promise.all([
-      collectTrendData(page, options, "search", intercepted.search || [], options.words.map(defaultOverviewRow)),
-      collectTrendData(page, options, "feed", intercepted.feed || [], options.words.map(defaultOverviewRow)),
+      collectTrendData(page, options, "search", intercepted.search || [], options.words.map(defaultOverviewRow), {
+        allowDirectApi: true,
+      }),
+      collectTrendData(page, options, "feed", intercepted.feed || [], options.words.map(defaultOverviewRow), {
+        allowDirectApi: true,
+      }),
     ]);
 
     const hasData = hasTrendPoints(searchResult) || hasTrendPoints(feedResult);
@@ -500,14 +547,23 @@ async function collectTrendData(
   kind: BaiduIndexKind,
   intercepted: SearchIndexResponse[],
   overview: OverviewRow[],
+  collectOptions: { allowDirectApi?: boolean; allowFallbackApi?: boolean } = {},
 ): Promise<BaiduIndexSection> {
   const apiUrl = buildApiPath(options, kind);
   try {
     const rawResponse =
       intercepted.find((item) => hasWords(item, options.words) && hasDateRange(item, options)) ||
-      intercepted.find((item) => hasWords(item, options.words) && !options.startDate && !options.endDate) ||
-      (!options.startDate && !options.endDate ? intercepted[0] : undefined) ||
-      (await fetchIndexApi(page, options, kind));
+      intercepted.find((item) => hasWords(item, options.words)) ||
+      intercepted[0] ||
+      (collectOptions.allowDirectApi || collectOptions.allowFallbackApi ? await fetchIndexApi(page, options, kind) : undefined);
+    if (!rawResponse) {
+      return {
+        apiUrl,
+        overview,
+        trends: [],
+        error: `Baidu ${kind} index returned no trend data: page response not captured`,
+      };
+    }
     const raw = await ensureDecrypted(page, rawResponse, kind);
 
     if (!rawIndexes(raw).length) {
@@ -587,7 +643,7 @@ async function extractOverview(
 
 async function fetchIndexApi(page: PageLike, options: Options, kind: BaiduIndexKind): Promise<SearchIndexResponse> {
   const apiPath = buildApiPath(options, kind);
-  const result = await evaluateWithNavigationRetry(page, async (path) => {
+  const result = await evaluateBaiduApiInPage(page, async (path) => {
     const response = await fetch(path, {
       credentials: "include",
       headers: {
@@ -602,11 +658,29 @@ async function fetchIndexApi(page: PageLike, options: Options, kind: BaiduIndexK
   return ensureDecrypted(page, result, kind);
 }
 
+async function evaluateBaiduApiInPage<Arg, Result>(
+  page: PageLike,
+  callback: (arg: Arg) => Result | Promise<Result>,
+  arg: Arg,
+): Promise<Result> {
+  try {
+    return await page.evaluate(callback as never, arg);
+  } catch (error) {
+    if (isTargetClosedError(error)) throw error;
+    return evaluateWithNavigationRetry(page, callback, arg);
+  }
+}
+
 async function ensureLoggedIn(context: BrowserContextLike, page: PageLike, options: Options): Promise<void> {
   if (await hasValidBaiduLogin(context, page)) return;
 
   runtimeInfo(`百度账号未登录，请在打开的浏览器中完成登录；最多等待 ${Math.round(options.loginTimeoutMs / 60_000)} 分钟...`);
-  await waitForBaiduLogin(context, page, options.loginTimeoutMs, !options.headless);
+  await setBaiduLoginGuide(page, !options.headless);
+  try {
+    await waitForBaiduLogin(context, page, options.loginTimeoutMs, !options.headless);
+  } finally {
+    await setBaiduLoginGuide(page, false);
+  }
   await setPageStatus(page, !options.headless, "已检测到百度登录，正在返回指数页...");
 
   await page.goto(DEFAULT_HOME_URL, {
@@ -625,6 +699,7 @@ async function waitForBaiduLogin(
   const startedAt = Date.now();
   let lastNoticeAt = 0;
   while (Date.now() - startedAt < timeoutMs) {
+    assertBrowserSessionAlive(context, "百度");
     assertLoginWindowOpen(context, page, "百度");
     try {
       if (await hasValidBaiduLogin(context, page)) {
@@ -659,6 +734,7 @@ async function waitForBaiduLogin(
 
 const contextStatusHandlers = new WeakMap<BrowserContextLike, (message: string) => void>();
 const contextQuietStatus = new WeakSet<BrowserContextLike>();
+const BAIDU_RESPONSE_CAPTURE_TIMEOUT_MS = 1_500;
 
 function emitStatus(options: Options, message: string): void {
   options.onStatus?.(message);
@@ -674,6 +750,51 @@ function emitStatusFromContext(context: BrowserContextLike, message: string): vo
 
 function logContextStatus(context: BrowserContextLike, message: string): void {
   if (!contextQuietStatus.has(context)) runtimeInfo(message);
+}
+
+function queueBaiduResponseCapture(
+  response: ResponseLike,
+  intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
+  tasks: Set<Promise<void>>,
+): void {
+  const task = captureBaiduApiResponse(response, intercepted);
+  if (!task) return;
+  tasks.add(task);
+  task.finally(() => tasks.delete(task));
+}
+
+function captureBaiduApiResponse(
+  response: ResponseLike,
+  intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
+): Promise<void> | undefined {
+  const kind = baiduApiKindFromUrl(response.url());
+  if (!kind) return undefined;
+  return readJsonResponse<SearchIndexResponse>(response).then((json) => {
+    if (json) intercepted[kind]?.push(json);
+  });
+}
+
+async function waitForBaiduApiResponses(
+  page: PageLike,
+  kinds: BaiduIndexKind[],
+  timeoutMs: number,
+  intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
+  tasks: Set<Promise<void>>,
+): Promise<void> {
+  if (!page.waitForResponse) return;
+  const captureTimeoutMs = Math.min(Math.max(timeoutMs, 1_000), BAIDU_RESPONSE_CAPTURE_TIMEOUT_MS);
+  await Promise.allSettled(kinds.map(async (kind) => {
+    const response = await page.waitForResponse!(
+      (candidate) => baiduApiKindFromUrl(candidate.url()) === kind,
+      { timeout: captureTimeoutMs },
+    );
+    queueBaiduResponseCapture(response, intercepted, tasks);
+  }));
+}
+
+async function flushBaiduResponseCaptures(tasks: Set<Promise<void>>): Promise<void> {
+  if (tasks.size === 0) return;
+  await Promise.allSettled([...tasks]);
 }
 
 async function isLoggedInFromPage(page: PageLike): Promise<boolean> {
@@ -723,7 +844,7 @@ async function ensureDecrypted(
 
 async function fetchDecryptKey(page: PageLike, uniqid: string): Promise<string> {
   const path = `/Interface/ptbk?uniqid=${encodeURIComponent(uniqid)}`;
-  const result = await evaluateWithNavigationRetry(page, async (url) => {
+  const result = await evaluateBaiduApiInPage(page, async (url) => {
     const response = await fetch(url, {
       credentials: "include",
       headers: {

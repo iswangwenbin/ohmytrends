@@ -255,6 +255,7 @@ bun src/cli.ts get --source all --words "gemini,claude" --format json
 | `--end-date YYYY-MM-DD` | 两者 | 数据源相关 | 自定义范围结束日期。 |
 | `--range 1h|4h|1d|7d|30d|90d|180d|1y|5y|all` | 两者 | `30d` | 统一的数据源无关时间范围。 |
 | `--area 0` | 百度 | `0` | 百度地区代码。 |
+| `--baidu-mode page|api` | 百度 | `page` | 百度采集模式。`page` 会模拟页面输入和点击，并捕获页面正常产生的响应；`api` 会先尝试更快的接口直连，失败后回退页面采集。 |
 | `--geo US` | Google | 全球 | Google Trends 地区代码。 |
 | `--lang en|zh` | 两者 | 系统 locale | 终端语言。 |
 
@@ -445,6 +446,21 @@ bun src/cli.ts get --source baidu --words "微信指数" --out exports/baidu-ind
 
 ```bash
 bun src/cli.ts get --source baidu --words "微信指数,google"
+```
+
+### 采集模式
+
+百度默认使用 `--baidu-mode page`。Page 模式会像人工操作一样打开百度指数页面、
+输入关键词、点击搜索，并捕获页面正常产生的响应。它比接口直连慢一些，但通常更不容易触发百度的异常访问提示。
+
+```bash
+bun src/cli.ts get --source baidu --words "微信指数,google" --baidu-mode page
+```
+
+只有在明确需要更快的接口直连时，再手动使用 `api` 模式：
+
+```bash
+bun src/cli.ts get --source baidu --words "微信指数,google" --baidu-mode api
 ```
 
 如果百度提示关键词未被收录，CLI 会：

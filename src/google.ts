@@ -1,10 +1,12 @@
 import { launchPersistentContext } from "cloakbrowser";
 import {
   assertLoginWindowOpen,
+  assertBrowserSessionAlive,
   closeContextSafely,
   evaluateWithNavigationRetry,
   hasCookieInProfile,
   hasOpenPages,
+  installBrowserSessionBridge,
   installContextStatusOverlay,
   isTargetClosedError,
   keepContextOpenUntilExit,
@@ -96,6 +98,10 @@ export async function verifyGoogleLogin(options: Pick<Options, "profileDir" | "t
 }
 
 export async function loginGoogle(options: Options): Promise<void> {
+  await loginGoogleAttempt(options, 0);
+}
+
+async function loginGoogleAttempt(options: Options, retryCount: number): Promise<void> {
   emitStatus(options, "正在准备 Google 登录...");
   const browser = await launchPersistentContext({
     userDataDir: googleProfileDirFor(options),
@@ -108,7 +114,9 @@ export async function loginGoogle(options: Options): Promise<void> {
   });
   contextStatusHandlers.set(browser, (message) => emitStatus(options, message));
   if (options.quietStatus) contextQuietStatus.add(browser);
+  await installBrowserSessionBridge(browser);
   await installContextStatusOverlay(browser, true, "正在准备 Google 登录...");
+  let retrying = false;
 
   try {
     const page = await browser.newPage();
@@ -140,9 +148,20 @@ export async function loginGoogle(options: Options): Promise<void> {
     logStatus(options, "请在打开的浏览器里登录 Google...");
     emitStatus(options, "请在打开的浏览器里登录 Google...");
     await waitForGoogleLogin(browser, page, options.loginTimeoutMs, true);
+  } catch (error) {
+    if (retryCount < 1 && isGoogleLoginInterruptedError(error)) {
+      retrying = true;
+      runtimeInfo("Google 登录窗口已关闭，正在重新打开登录窗口...");
+      emitStatus(options, "Google 登录窗口已关闭，正在重新打开登录窗口...");
+      await closeContextSafely(browser);
+      return await loginGoogleAttempt(options, retryCount + 1);
+    }
+    throw error;
   } finally {
-    if (options.keepOpen && !options.headless) {
-      runtimeInfo("已设置 --keep-open true，保留 Google 浏览器窗口。");
+    if (retrying) {
+      // The closed login window has already been cleaned up before retrying.
+    } else if (options.keepOpen && !options.headless && hasOpenPages(browser)) {
+      keepContextOpenUntilExit(browser, "已设置 --keep-open true，保留 Google 浏览器窗口。");
     } else {
       await closeContextSafely(browser);
     }
@@ -242,17 +261,19 @@ async function waitForGoogleLogin(
 ): Promise<void> {
   const startedAt = Date.now();
   let lastNoticeAt = 0;
+  let activePage = page;
   while (Date.now() - startedAt < timeoutMs) {
-    assertLoginWindowOpen(context, page, "Google");
+    assertBrowserSessionAlive(context, "Google");
+    activePage = selectActiveGoogleLoginPage(context, activePage);
     try {
-      if (await hasValidGoogleLogin(context, page)) {
+      if (await hasValidGoogleLogin(context, activePage)) {
         logContextStatus(context, "已检测到 Google 登录，继续执行任务...");
         emitStatusFromContext(context, "已检测到 Google 登录，继续执行任务...");
         await setContextStatus(context, showStatus, "已检测到 Google 登录，继续执行任务...");
         return;
       }
     } catch (error) {
-      if (isTargetClosedError(error)) throw new Error(loginWindowClosedMessage("Google"));
+      if (isGoogleLoginInterruptedError(error)) throw new Error(loginWindowClosedMessage("Google"));
       throw error;
     }
 
@@ -265,14 +286,45 @@ async function waitForGoogleLogin(
     }
 
     try {
-      await page.waitForTimeout(1_000);
+      await activePage.waitForTimeout(1_000);
     } catch (error) {
-      if (isTargetClosedError(error)) throw new Error(loginWindowClosedMessage("Google"));
+      if (isGoogleLoginInterruptedError(error)) throw new Error(loginWindowClosedMessage("Google"));
       throw error;
     }
   }
 
   throw new Error("等待 Google 登录超时；请在打开的浏览器中完成登录后重新运行");
+}
+
+export function selectActiveGoogleLoginPage(context: BrowserContextLike, fallback: PageLike): PageLike {
+  try {
+    const openPages = context.pages().filter((candidate) => !candidate.isClosed?.());
+    const preferred = openPages.find((candidate) => /accounts\.google\.com|trends\.google\.com/.test(safePageUrl(candidate)))
+      || (!fallback.isClosed?.() ? fallback : undefined);
+    if (preferred) return preferred;
+  } catch {
+    // Fall through to the existing closed-window error.
+  }
+  throw new Error(loginWindowClosedMessage("Google"));
+}
+
+function safePageUrl(page: PageLike): string {
+  try {
+    return page.url();
+  } catch {
+    return "";
+  }
+}
+
+function isLoginWindowClosedError(error: unknown, service: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message === loginWindowClosedMessage(service);
+}
+
+function isGoogleLoginInterruptedError(error: unknown): boolean {
+  if (isLoginWindowClosedError(error, "Google") || isTargetClosedError(error)) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /net::ERR_ABORTED|frame was detached|Navigation failed because page was closed/i.test(message);
 }
 
 const contextStatusHandlers = new WeakMap<BrowserContextLike, (message: string) => void>();
