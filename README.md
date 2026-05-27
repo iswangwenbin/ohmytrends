@@ -4,10 +4,9 @@ English | [简体中文](README.zh-CN.md)
 
 `ohmytrends` is a Bun-only API / CLI for querying Google Trends and Baidu Index
 
-It opens a persistent `cloakbrowser` Chromium profile, lets you log in manually
-when needed, then uses the authenticated page context to request and parse trend
-data. The project does not bypass login, paid permissions, or third-party access
-controls.
+It lets you log in manually when needed, then uses the authenticated page
+context to request and parse trend data. The project does not bypass login,
+paid permissions, or third-party access controls.
 
 ## Features
 
@@ -22,7 +21,6 @@ controls.
 - Dual collection modes for both sources: `--baidu-mode page|api` and
   `--google-mode page|api`.
 - Unified `--range` values with Google `--geo` support.
-- Persistent browser profiles through `cloakbrowser`.
 - Clack-powered manual login flow for Baidu and Google.
 - Headless by default, with automatic visible-browser fallback when login is
   missing.
@@ -41,7 +39,6 @@ controls.
 - Bun 1.3 or newer. This project is Bun-only. npm / Node.js runtime is not supported.
 - Network access to Baidu Index or Google Trends.
 - Your own authorized account session when a service requires login.
-- A local Chromium runtime managed by `cloakbrowser`.
 
 ## Install And Run
 
@@ -60,7 +57,7 @@ bun install
 3. Start ohmytrends:
 
 ```bash
-bun src/cli.ts
+bun run start
 ```
 
 The first run will guide you through manual login when Baidu or Google needs an
@@ -75,7 +72,7 @@ bun src/cli.ts get --words "gemini,claude"
 Start the local API server:
 
 ```bash
-bun src/cli.ts serve
+bun run start
 ```
 
 Print JSON:
@@ -94,7 +91,7 @@ bun run build
 ## API
 
 ```bash
-bun src/cli.ts serve
+bun run start
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
 ```
 
