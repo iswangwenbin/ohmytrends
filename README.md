@@ -10,29 +10,14 @@ paid permissions, or third-party access controls.
 
 ## Features
 
-- Baidu Index search index collection.
-- Baidu Index feed/news index collection.
-- Baidu overview table parsing.
-- Baidu multi-keyword search with comma-separated words.
-- Baidu unindexed keyword handling: unavailable words are reported, removed from
-  live queries, and returned with default `0` values.
-- Google Trends multi-keyword timeline collection, up to 5 comparison keywords.
-- Google Trends related queries collection, separated into `top` and `rising`.
-- Dual collection modes for both sources: `--baidu-mode page|api` and
-  `--google-mode page|api`.
-- Unified `--range` values with Google `--geo` support.
-- Clack-powered manual login flow for Baidu and Google.
-- Headless by default, with automatic visible-browser fallback when login is
-  missing.
-- Non-headless status overlay in the bottom-right corner with Chinese progress
-  messages.
-- English and Chinese terminal UI through `--lang en|zh`.
-- `--keep-open true` for debugging a visible browser after collection.
-- Human-readable table output and unified JSON output.
-- Optional Bun + Elysia HTTP API server for JSON queries.
-- Optional raw third-party response output with `--raw true`.
-- Bun single-file executable build through `bun run build`.
-- Bare `ohmytrends` command opens an interactive Clack menu.
+- Query Google Trends and Baidu Index from one Bun CLI.
+- Collect Baidu search/feed indexes, overview rows, and Google timeline/related
+  queries.
+- Compare multiple keywords with unified range options and Google `--geo`
+  support.
+- Use authenticated sessions through a guided manual login flow when needed.
+- Output readable tables, unified JSON, or serve a local JSON API.
+- Debug with visible-browser mode and build a single-file executable.
 
 ## Requirements
 
@@ -42,7 +27,7 @@ paid permissions, or third-party access controls.
 
 ## Install And Run
 
-1. Install Bun:
+1. Install Bun 1.3 or newer:
 
 ```bash
 curl -fsSL https://bun.com/install | bash
@@ -54,7 +39,13 @@ curl -fsSL https://bun.com/install | bash
 bun install
 ```
 
-3. Start ohmytrends:
+For development mode:
+
+```bash
+bun run dev
+```
+
+3. Start the local API server:
 
 ```bash
 bun run start
@@ -63,22 +54,22 @@ bun run start
 The first run will guide you through manual login when Baidu or Google needs an
 account session.
 
-4. Query from the CLI:
+4. Query from another terminal:
 
 ```bash
-bun src/cli.ts get --words "gemini,claude"
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
 ```
 
-Start the local API server:
+Run a CLI query instead:
 
 ```bash
-bun run start
+bun run get -- --words "gemini,claude"
 ```
 
 Print JSON:
 
 ```bash
-bun src/cli.ts get --words "gemini,claude" --format json
+bun run get -- --words "gemini,claude" --format json
 ```
 
 Build a local binary:
@@ -102,12 +93,25 @@ See [`docs/cli-usage.md`](docs/cli-usage.md) for the full CLI reference: command
 ## Development
 
 ```bash
+# Install project dependencies.
 bun install
+
+# Run generated CSS build, type checking, and tests.
 bun run ci
+
+# Start the interactive CLI in development defaults.
 bun run dev
+
+# Start development mode with a visible browser kept open for debugging.
 bun run dev:debug
+
+# Query one keyword and print JSON output.
 bun run get -- --words "gemini" --format json
+
+# Build the local single-file executable.
 bun run build
+
+# Run release validation and a dry-run package build.
 bun run release:check
 ```
 

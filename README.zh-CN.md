@@ -4,41 +4,26 @@
 
 `ohmytrends` 是一个只支持 Bun 的命令行工具，用来通过 API / CLI 的方式查询 Google Trends 和百度指数
 
-它会打开一个持久化的 `cloakbrowser` Chromium 用户资料目录，在需要时让你手动登录，然后在已认证的页面上下文中请求并解析趋势数据。本项目不会绕过登录、付费权限或第三方访问控制。
+它会在需要时让你手动登录，然后在已认证的页面上下文中请求并解析趋势数据。本项目不会绕过登录、付费权限或第三方访问控制。
 
 ## 功能
 
-- 采集百度搜索指数。
-- 采集百度资讯指数。
-- 解析百度指数概览表格。
-- 支持百度多个关键词查询，关键词使用英文逗号分隔。
-- 处理百度未收录关键词：命令行和状态浮层会提示，实时查询时自动剔除，并在最终结果中返回默认 `0` 值。
-- 采集 Google Trends 多关键词时间线，最多支持 5 个关键词对比。
-- 采集 Google Trends Related queries，并区分 `top` 和 `rising`。
-- 百度和 Google 都支持双采集模式：`--baidu-mode page|api`、`--google-mode page|api`。
-- 提供统一的 `--range` 参数，并支持 Google `--geo`。
-- 使用 `cloakbrowser` 持久化浏览器资料目录。
-- 支持基于 Clack 的百度和 Google 手动登录流程。
-- 默认 headless 运行，缺少登录状态时自动回退到可视浏览器。
-- 非 headless 模式会在页面右下角注入中文采集状态浮层。
-- 终端 UI 支持英文和中文，可用 `--lang en|zh` 切换。
-- 支持 `--keep-open true`，方便采集后保留浏览器窗口调试。
-- 支持人类可读表格输出和统一 JSON 输出。
-- 支持基于 Bun + Elysia 的可选 HTTP API 服务。
-- 支持 `--raw true` 输出第三方原始响应，主要用于本地调试。
-- 支持通过 `bun run build` 构建 Bun 单文件可执行程序。
-- 直接运行 `ohmytrends` 会打开交互式 Clack 交互菜单。
+- 用一个 Bun CLI 查询 Google Trends 和百度指数。
+- 采集百度搜索 / 资讯指数、概览表格，以及 Google 时间线 / related queries。
+- 支持多关键词对比、统一时间范围参数和 Google `--geo`。
+- 需要登录时，通过引导式手动登录使用已授权账号会话。
+- 支持可读表格、统一 JSON 输出，也可以启动本地 JSON API。
+- 支持可视浏览器调试模式，并可构建单文件可执行程序。
 
 ## 环境要求
 
 - Bun 1.3 或更新版本。本项目只支持 Bun，不支持 npm / Node.js runtime。
 - 能访问百度指数或 Google Trends。
 - 当服务要求登录时，需要使用你自己有权限的账号会话。
-- 本地 Chromium 运行环境由 `cloakbrowser` 管理。
 
 ## 安装和运行
 
-1. 安装 Bun：
+1. 安装 Bun 1.3 或更新版本：
 
 ```bash
 curl -fsSL https://bun.com/install | bash
@@ -50,30 +35,36 @@ curl -fsSL https://bun.com/install | bash
 bun install
 ```
 
-3. 启动 ohmytrends：
+开发模式：
 
 ```bash
-bun src/cli.ts
+bun run dev
+```
+
+3. 启动本地 API 服务：
+
+```bash
+bun run start
 ```
 
 首次运行时，如果百度或 Google 需要账号登录，会自动引导你打开浏览器手动登录。
 
-4. 用 CLI 查询：
+4. 在另一个终端查询：
 
 ```bash
-bun src/cli.ts get --words "gemini,claude"
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
 ```
 
-启动本地 API 服务：
+也可以直接运行 CLI 查询：
 
 ```bash
-bun src/cli.ts serve
+bun run get -- --words "gemini,claude"
 ```
 
 输出 JSON：
 
 ```bash
-bun src/cli.ts get --words "gemini,claude" --format json
+bun run get -- --words "gemini,claude" --format json
 ```
 
 构建本地二进制：
@@ -86,7 +77,7 @@ bun run build
 ## API
 
 ```bash
-bun src/cli.ts serve
+bun run start
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
 ```
 
@@ -97,13 +88,26 @@ curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30
 ## 开发
 
 ```bash
+# 安装项目依赖。
 bun install
+
+# 生成 CSS、运行类型检查和测试。
 bun run ci
+
+# 使用开发默认值启动交互式 CLI。
 bun run dev
+
+# 以可视浏览器调试模式启动，并在采集后保留窗口。
 bun run dev:debug
+
+# 查询一个关键词并输出 JSON。
 bun run get -- --words "gemini" --format json
+
+# 构建本地单文件可执行程序。
 bun run build
-bun pm pack --dry-run
+
+# 运行发布检查和 dry-run 打包。
+bun run release:check
 ```
 
 CI 会在 pull request 上运行类型检查和 Bun 测试。
