@@ -24,6 +24,8 @@
     "dev:debug": "OHMYTRENDS_LANG=zh OHMYTRENDS_GOOGLE_MODE=page OHMYTRENDS_HEADLESS=false OHMYTRENDS_KEEP_OPEN=true bun src/cli.ts",
     "get": "bun src/cli.ts get",
     "prepack": "bun run ci",
+    "postinstall": "bun run prepare:browser",
+    "prepare:browser": "cloakbrowser install",
     "release:check": "bun scripts/release-check.ts && bun run build && bun pm pack --dry-run",
     "start": "bun src/cli.ts serve",
     "test": "bun test",
