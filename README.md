@@ -38,74 +38,63 @@ controls.
 
 ## Requirements
 
-- Bun 1.3 or newer. This project is Bun-only and is not tested with Node.js.
+- Bun 1.3 or newer. This project is Bun-only. npm / Node.js runtime is not supported.
 - Network access to Baidu Index or Google Trends.
 - Your own authorized account session when a service requires login.
 - A local Chromium runtime managed by `cloakbrowser`.
 
-## Install
+## Install And Run
 
-If Bun is not installed yet:
+1. Install Bun:
 
 ```bash
 curl -fsSL https://bun.com/install | bash
 ```
 
-Then install project dependencies:
+2. Install dependencies:
 
 ```bash
 bun install
 ```
 
-Optional local check:
+3. Start ohmytrends:
 
 ```bash
-bun run ci
+bun src/cli.ts
 ```
 
-Development shortcuts (interactive Clack menu):
+The first run will guide you through manual login when Baidu or Google needs an
+account session.
 
-```bash
-bun run dev        # default headless collection mode
-bun run dev:debug  # visible browser with keep-open debugging
-```
-
-Start the HTTP API server:
-
-```bash
-bun run start      # equivalent to: bun src/cli.ts serve
-```
-
-## Quick Start
-
-Log in once. The command opens a visible browser when login is needed:
-
-```bash
-bun src/cli.ts login
-```
-
-Query both Google Trends and Baidu Index. `--source all` and `--range 30d` are
-the defaults:
+4. Query from the CLI:
 
 ```bash
 bun src/cli.ts get --words "gemini,claude"
 ```
 
-Print unified JSON to stdout:
-
-```bash
-bun src/cli.ts get --words "gemini,claude" --format json
-```
-
-Start the local HTTP API:
+Start the local API server:
 
 ```bash
 bun src/cli.ts serve
 ```
 
-Query the API:
+Print JSON:
 
 ```bash
+bun src/cli.ts get --words "gemini,claude" --format json
+```
+
+Build a local binary:
+
+```bash
+bun run build
+./bin/ohmytrends get --words "gemini,claude"
+```
+
+## API
+
+```bash
+bun src/cli.ts serve
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
 ```
 
@@ -118,6 +107,8 @@ See [`docs/cli-usage.md`](docs/cli-usage.md) for the full CLI reference: command
 ```bash
 bun install
 bun run ci
+bun run dev
+bun run dev:debug
 bun run get -- --words "gemini" --format json
 bun run build
 bun run release:check

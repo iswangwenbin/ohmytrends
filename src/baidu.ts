@@ -4,7 +4,6 @@ import {
   assertLoginWindowOpen,
   closeContextSafely,
   evaluateWithNavigationRetry,
-  hasCookieInProfile,
   hasOpenPages,
   installBrowserSessionBridge,
   installContextStatusOverlay,
@@ -20,6 +19,7 @@ import {
 import { buildBaiduTrendUrl, DEFAULT_HOME_URL } from "./config.js";
 import { runtimeInfo, runtimeWarn } from "./logger.js";
 import { defaultOverviewRow, hasOverviewData, overviewRowFromCells, zeroOverviewRow } from "./overview.js";
+import { clearSessionMarker, hasVerifiedSessionMarker, markSessionVerified } from "./session-marker.js";
 import type {
   BrowserContextLike,
   BaiduIndexKind,
@@ -57,7 +57,10 @@ export async function verifyBaiduLogin(options: Pick<Options, "profileDir" | "ti
     });
     await page.waitForSelector("body", { timeout: options.timeoutMs });
     await waitForBaiduHomeHydrated(page, options.timeoutMs);
-    return await hasValidBaiduLogin(browser, page);
+    const verified = await hasValidBaiduLogin(browser, page);
+    if (verified) await markSessionVerified(options.profileDir, "baidu");
+    else await clearSessionMarker(options.profileDir);
+    return verified;
   } finally {
     await closeContextSafely(browser);
   }
@@ -92,6 +95,7 @@ export async function loginBaidu(options: Options): Promise<void> {
     await setPageStatus(page, true, "正在检查百度登录状态...");
     await waitForBaiduHomeHydrated(page, options.timeoutMs);
     if (await hasValidBaiduLogin(browser, page)) {
+      await markSessionVerified(options.profileDir, "baidu");
       logStatus(options, "百度登录状态已就绪。");
       emitStatus(options, "百度登录状态已就绪。");
       await setPageStatus(page, true, "百度登录状态已就绪。");
@@ -102,6 +106,7 @@ export async function loginBaidu(options: Options): Promise<void> {
     await setBaiduLoginGuide(page, true);
     try {
       await waitForBaiduLogin(browser, page, options.loginTimeoutMs, true);
+      await markSessionVerified(options.profileDir, "baidu");
     } finally {
       await setBaiduLoginGuide(page, false);
     }
@@ -334,7 +339,7 @@ async function collectBaiduIndexViaPageMode(
 }
 
 export function hasBaiduLoginInProfile(profileDir: string): boolean {
-  return hasCookieInProfile(profileDir, ["BDUSS", "BDUSS_BFESS"]);
+  return hasVerifiedSessionMarker(profileDir, "baidu");
 }
 
 async function tryCollectBaiduIndexFromApi(
@@ -699,7 +704,11 @@ async function evaluateBaiduApiInPage<Arg, Result>(
 }
 
 async function ensureLoggedIn(context: BrowserContextLike, page: PageLike, options: Options): Promise<void> {
-  if (await hasValidBaiduLogin(context, page)) return;
+  if (await hasValidBaiduLogin(context, page)) {
+    await markSessionVerified(options.profileDir, "baidu");
+    return;
+  }
+  await clearSessionMarker(options.profileDir);
 
   runtimeInfo(`百度账号未登录，请在打开的浏览器中完成登录；最多等待 ${Math.round(options.loginTimeoutMs / 60_000)} 分钟...`);
   await setBaiduLoginGuide(page, !options.headless);
@@ -723,8 +732,10 @@ async function ensureLoggedIn(context: BrowserContextLike, page: PageLike, optio
   // closed mid-flow and an intermediate redirect was misread as success),
   // re-verifying here catches it instead of continuing into garbage data.
   if (!await hasValidBaiduLogin(context, page)) {
+    await clearSessionMarker(options.profileDir);
     throw new Error("百度登录验证失败：返回首页后仍未检测到有效登录，请重新发起登录。");
   }
+  await markSessionVerified(options.profileDir, "baidu");
 }
 
 async function waitForBaiduLogin(

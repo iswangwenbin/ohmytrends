@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { cp, mkdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { hasCookieInProfile } from "./browser-utils.js";
 import { DEFAULT_BAIDU_PROFILE_DIR, DEFAULT_GOOGLE_PROFILE_DIR } from "./config.js";
 import type { Source } from "./types.js";
 
@@ -51,16 +50,8 @@ export async function scanBrowserProfiles(): Promise<BrowserProfileCandidate[]> 
         profileName,
         profileDir,
         rootDir: root.rootDir,
-        hasBaidu: hasCookieInProfile(profileDir, ["BDUSS", "BDUSS_BFESS"]),
-        hasGoogle: hasCookieInProfile(profileDir, [
-          "SID",
-          "HSID",
-          "SSID",
-          "APISID",
-          "SAPISID",
-          "__Secure-1PSID",
-          "__Secure-3PSID",
-        ]),
+        hasBaidu: false,
+        hasGoogle: false,
       };
       if (candidate.hasBaidu || candidate.hasGoogle) candidates.push(candidate);
     }

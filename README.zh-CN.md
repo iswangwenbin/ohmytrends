@@ -31,73 +31,62 @@
 
 ## 环境要求
 
-- Bun 1.3 或更新版本。本项目只支持 Bun，不使用 Node.js 测试。
+- Bun 1.3 或更新版本。本项目只支持 Bun，不支持 npm / Node.js runtime。
 - 能访问百度指数或 Google Trends。
 - 当服务要求登录时，需要使用你自己有权限的账号会话。
 - 本地 Chromium 运行环境由 `cloakbrowser` 管理。
 
-## 安装
+## 安装和运行
 
-如果还没安装 Bun：
+1. 安装 Bun：
 
 ```bash
 curl -fsSL https://bun.com/install | bash
 ```
 
-然后安装项目依赖：
+2. 安装依赖：
 
 ```bash
 bun install
 ```
 
-可选本地检查：
+3. 启动 ohmytrends：
 
 ```bash
-bun run ci
+bun src/cli.ts
 ```
 
-开发常用命令（启动 Clack 交互菜单）：
+首次运行时，如果百度或 Google 需要账号登录，会自动引导你打开浏览器手动登录。
 
-```bash
-bun run dev        # 默认 headless 采集模式
-bun run dev:debug  # 打开可视浏览器并保留窗口
-```
-
-启动 HTTP API 服务：
-
-```bash
-bun run start      # 等价于：bun src/cli.ts serve
-```
-
-## 快速开始
-
-先登录一次。缺少登录状态时会自动打开可视浏览器：
-
-```bash
-bun src/cli.ts login
-```
-
-查询 Google Trends 和百度指数。`--source all` 和 `--range 30d` 是默认值：
+4. 用 CLI 查询：
 
 ```bash
 bun src/cli.ts get --words "gemini,claude"
 ```
 
-把统一 JSON 打印到 stdout：
-
-```bash
-bun src/cli.ts get --words "gemini,claude" --format json
-```
-
-启动本地 HTTP API：
+启动本地 API 服务：
 
 ```bash
 bun src/cli.ts serve
 ```
 
-请求 API：
+输出 JSON：
 
 ```bash
+bun src/cli.ts get --words "gemini,claude" --format json
+```
+
+构建本地二进制：
+
+```bash
+bun run build
+./bin/ohmytrends get --words "gemini,claude"
+```
+
+## API
+
+```bash
+bun src/cli.ts serve
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
 ```
 
@@ -110,6 +99,8 @@ curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30
 ```bash
 bun install
 bun run ci
+bun run dev
+bun run dev:debug
 bun run get -- --words "gemini" --format json
 bun run build
 bun pm pack --dry-run

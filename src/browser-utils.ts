@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { Database } from "bun:sqlite";
 import floatingCoreUmd from "./generated/floating-ui.core.umd.min.js" with { type: "text" };
 import floatingDomUmd from "./generated/floating-ui.dom.umd.min.js" with { type: "text" };
 import { runtimeInfo } from "./logger.js";
@@ -580,17 +578,17 @@ function installBaiduLoginGuideScript(defaultMessage: string): void {
         box-sizing: border-box !important;
         display: grid !important;
         grid-template-columns: auto minmax(0, 1fr) !important;
-        gap: 16px !important;
+        gap: 12px !important;
         align-items: center !important;
-        width: min(420px, calc(100vw - 48px)) !important;
-        min-height: 92px !important;
-        padding: 18px 22px 18px 78px !important;
-        border: 3px solid #f97316 !important;
-        border-radius: 18px !important;
+        width: min(360px, calc(100vw - 40px)) !important;
+        min-height: 74px !important;
+        padding: 14px 18px 14px 58px !important;
+        border: 2px solid #f97316 !important;
+        border-radius: 12px !important;
         background: rgba(255, 255, 255, .96) !important;
         color: #431407 !important;
-        box-shadow: 5px 5px 0 #f97316, 0 14px 30px rgba(124, 45, 18, .14) !important;
-        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+        box-shadow: 3px 3px 0 #f97316, 0 8px 20px rgba(124, 45, 18, .12) !important;
+        font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
         letter-spacing: 0 !important;
         pointer-events: none !important;
         opacity: 0 !important;
@@ -607,13 +605,13 @@ function installBaiduLoginGuideScript(defaultMessage: string): void {
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
-        width: 70px !important;
-        height: 70px !important;
+        width: 48px !important;
+        height: 48px !important;
         border-radius: 999px !important;
-        border: 5px solid rgba(255, 255, 255, .96) !important;
+        border: 3px solid rgba(255, 255, 255, .96) !important;
         background: #fb923c !important;
         color: #ffffff !important;
-        font-size: 34px !important;
+        font-size: 24px !important;
         font-weight: 900 !important;
         line-height: 1 !important;
         transform: translateY(-50%) !important;
@@ -625,15 +623,16 @@ function installBaiduLoginGuideScript(defaultMessage: string): void {
       #${id} .ohmytrends-login-guide__title {
         margin: 0 0 6px !important;
         color: #ea580c !important;
-        font-size: 14px !important;
+        font-size: 12px !important;
         font-weight: 900 !important;
         letter-spacing: .08em !important;
       }
       #${id} .ohmytrends-login-guide__text {
         margin: 0 !important;
         color: #111827 !important;
-        font-size: 18px !important;
+        font-size: 14px !important;
         font-weight: 900 !important;
+        line-height: 1.45 !important;
         overflow-wrap: anywhere !important;
       }
       #${arrowId} {
@@ -967,33 +966,6 @@ export async function readJsonResponse<T>(response: ResponseLike): Promise<T | u
   } catch {
     return undefined;
   }
-}
-
-export function hasCookieInProfile(profileDir: string, names: string[]): boolean {
-  const candidates = [
-    `${profileDir}/Default/Cookies`,
-    `${profileDir}/Default/Network/Cookies`,
-    `${profileDir}/Cookies`,
-    `${profileDir}/Network/Cookies`,
-  ];
-  for (const path of candidates) {
-    if (!existsSync(path)) continue;
-    try {
-      const db = new Database(path, { readonly: true });
-      try {
-        const placeholders = names.map(() => "?").join(",");
-        const row = db.query(`select 1 as found from cookies where name in (${placeholders}) limit 1`).get(...names) as {
-          found?: number;
-        } | null;
-        if (row?.found) return true;
-      } finally {
-        db.close();
-      }
-    } catch {
-      continue;
-    }
-  }
-  return false;
 }
 
 function isNavigationContextError(error: unknown): boolean {

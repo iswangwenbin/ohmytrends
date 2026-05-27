@@ -4,7 +4,6 @@ import {
   assertBrowserSessionAlive,
   closeContextSafely,
   evaluateWithNavigationRetry,
-  hasCookieInProfile,
   hasOpenPages,
   installBrowserSessionBridge,
   installContextStatusOverlay,
@@ -17,6 +16,7 @@ import {
 import { DEFAULT_GOOGLE_TRENDS_URL } from "./config.js";
 import { runtimeInfo } from "./logger.js";
 import { defaultOverviewRow } from "./overview.js";
+import { clearSessionMarker, hasVerifiedSessionMarker, markSessionVerified } from "./session-marker.js";
 import type {
   BrowserContextLike,
   CollectOutput,
@@ -99,7 +99,10 @@ export async function verifyGoogleLogin(options: Pick<Options, "profileDir" | "t
       timeout: options.timeoutMs,
     });
     await page.waitForSelector("body", { timeout: options.timeoutMs });
-    return await hasValidGoogleLogin(browser, page);
+    const verified = await hasValidGoogleLogin(browser, page);
+    if (verified) await markSessionVerified(options.profileDir, "google");
+    else await clearSessionMarker(options.profileDir);
+    return verified;
   } finally {
     await closeContextSafely(browser);
   }
@@ -139,6 +142,7 @@ async function loginGoogleAttempt(options: Options, retryCount: number): Promise
     emitStatus(options, "正在检查 Google 登录状态...");
     await setPageStatus(page, true, "正在检查 Google 登录状态...");
     if (await hasValidGoogleLogin(browser, page)) {
+      await markSessionVerified(googleProfileDirFor(options), "google");
       logStatus(options, "Google 登录状态已就绪。");
       emitStatus(options, "Google 登录状态已就绪。");
       await setPageStatus(page, true, "Google 登录状态已就绪。");
@@ -156,6 +160,7 @@ async function loginGoogleAttempt(options: Options, retryCount: number): Promise
     logStatus(options, "请在打开的浏览器里登录 Google...");
     emitStatus(options, "请在打开的浏览器里登录 Google...");
     await waitForGoogleLogin(browser, page, options.loginTimeoutMs, true);
+    await markSessionVerified(googleProfileDirFor(options), "google");
   } catch (error) {
     if (retryCount < 1 && isGoogleLoginInterruptedError(error)) {
       retrying = true;
@@ -221,6 +226,7 @@ export async function collectGoogleTrends(options: Options): Promise<CollectOutp
     await page.waitForSelector("body", { timeout: options.timeoutMs });
     tick("body ready");
     if (options.headless && !await hasValidGoogleLogin(browser, page)) {
+      await clearSessionMarker(googleProfileDir);
       runtimeInfo("Google 登录状态无效，正在打开可视浏览器用于重新登录...");
       await closeContextSafely(browser);
       return collectGoogleTrends({ ...options, headless: false });
@@ -246,15 +252,7 @@ export async function collectGoogleTrends(options: Options): Promise<CollectOutp
 }
 
 export function hasGoogleLoginInProfile(profileDir: string): boolean {
-  return hasCookieInProfile(profileDir, [
-    "SID",
-    "HSID",
-    "SSID",
-    "APISID",
-    "SAPISID",
-    "__Secure-1PSID",
-    "__Secure-3PSID",
-  ]);
+  return hasVerifiedSessionMarker(profileDir, "google");
 }
 
 function googleProfileDirFor(options: Options): string {
@@ -267,7 +265,12 @@ async function ensureGoogleLoggedIn(
   options: Options,
   returnUrl: string,
 ): Promise<void> {
-  if (await hasValidGoogleLogin(context, page)) return;
+  const profileDir = googleProfileDirFor(options);
+  if (await hasValidGoogleLogin(context, page)) {
+    await markSessionVerified(profileDir, "google");
+    return;
+  }
+  await clearSessionMarker(profileDir);
 
   runtimeInfo(`Google 账号未登录，请在打开的浏览器中完成登录；最多等待 ${Math.round(options.loginTimeoutMs / 60_000)} 分钟...`);
   const loginUrl = new URL("https://accounts.google.com/ServiceLogin");
@@ -284,6 +287,11 @@ async function ensureGoogleLoggedIn(
     timeout: options.timeoutMs,
   });
   await page.waitForSelector("body", { timeout: options.timeoutMs });
+  if (!await hasValidGoogleLogin(context, page)) {
+    await clearSessionMarker(profileDir);
+    throw new Error("Google 登录验证失败：返回 Trends 后仍未检测到有效登录，请重新发起登录。");
+  }
+  await markSessionVerified(profileDir, "google");
 }
 
 async function waitForGoogleLogin(
