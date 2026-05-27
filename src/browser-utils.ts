@@ -391,19 +391,12 @@ function installStatusOverlayScript(initialStatus: string): void {
     }
 
     position(node: HTMLElement) {
-      const viewport = window.visualViewport;
-      const margin = 18;
-      const viewportLeft = viewport?.offsetLeft ?? 0;
-      const viewportTop = viewport?.offsetTop ?? 0;
-      const viewportWidth = viewport?.width ?? window.innerWidth;
-      const viewportHeight = viewport?.height ?? window.innerHeight;
-      const left = viewportLeft + viewportWidth - margin;
-      const top = viewportTop + viewportHeight - margin;
-      node.style.setProperty("left", `${Math.floor(left)}px`, "important");
-      node.style.setProperty("top", `${Math.floor(top)}px`, "important");
+      const margin = 12;
+      node.style.setProperty("top", `${margin}px`, "important");
+      node.style.setProperty("left", "50%", "important");
       node.style.setProperty("right", "auto", "important");
       node.style.setProperty("bottom", "auto", "important");
-      node.style.setProperty("transform", "translate(-100%, -100%)", "important");
+      node.style.setProperty("transform", "translateX(-50%)", "important");
     }
 
     statusState(text: string) {
@@ -419,28 +412,29 @@ function installStatusOverlayScript(initialStatus: string): void {
       style.textContent = `
         #${this.id} {
           position: fixed !important;
-          left: calc(100vw - 18px) !important;
-          top: calc(100vh - 18px) !important;
+          top: 12px !important;
+          left: 50% !important;
           right: auto !important;
           bottom: auto !important;
-          transform: translate(-100%, -100%) !important;
+          transform: translateX(-50%) !important;
           z-index: 2147483647 !important;
           display: grid !important;
           box-sizing: border-box !important;
           grid-template-columns: auto minmax(0, 1fr) !important;
-          gap: 16px !important;
+          gap: 10px !important;
           align-items: center !important;
-          width: min(420px, calc(100vw - 48px)) !important;
-          max-width: min(420px, calc(100vw - 48px)) !important;
-          min-width: min(420px, calc(100vw - 48px)) !important;
-          min-height: 96px !important;
-          padding: 18px 20px 18px 72px !important;
-          border: 3px solid #10b981 !important;
-          border-radius: 18px !important;
+          width: min(280px, calc(100vw - 32px)) !important;
+          max-width: min(280px, calc(100vw - 32px)) !important;
+          min-width: min(280px, calc(100vw - 32px)) !important;
+          max-height: calc(100vh - 32px) !important;
+          min-height: 60px !important;
+          padding: 10px 14px 10px 46px !important;
+          border: 2px solid #10b981 !important;
+          border-radius: 12px !important;
           background: rgba(255, 255, 255, .96) !important;
-          box-shadow: 5px 5px 0 #10b981, 0 14px 30px rgba(15, 23, 42, .14) !important;
+          box-shadow: 3px 3px 0 #10b981, 0 8px 20px rgba(15, 23, 42, .12) !important;
           color: #0f172a !important;
-          font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+          font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
           letter-spacing: 0 !important;
           pointer-events: none !important;
           white-space: normal !important;
@@ -452,25 +446,25 @@ function installStatusOverlayScript(initialStatus: string): void {
           align-items: center !important;
           justify-content: center !important;
           position: absolute !important;
-          left: -28px !important;
+          left: -18px !important;
           top: 50% !important;
-          width: 70px !important;
-          height: 70px !important;
+          width: 44px !important;
+          height: 44px !important;
           padding: 0 !important;
           border-radius: 999px !important;
-          border: 5px solid rgba(255, 255, 255, .96) !important;
+          border: 3px solid rgba(255, 255, 255, .96) !important;
           background: #f97316 !important;
           color: #ffffff !important;
-          font-size: 32px !important;
+          font-size: 20px !important;
           font-weight: 800 !important;
           line-height: 1 !important;
           transform: translateY(-50%) !important;
-          box-shadow: 0 10px 18px rgba(124, 45, 18, .16), inset 0 -3px 0 rgba(124, 45, 18, .14) !important;
+          box-shadow: 0 6px 12px rgba(124, 45, 18, .16), inset 0 -2px 0 rgba(124, 45, 18, .14) !important;
         }
         #${this.id}[data-ohmytrends-state="done"] {
           animation: none !important;
           border-color: #16a34a !important;
-          box-shadow: 5px 5px 0 #10b981, 0 14px 30px rgba(15, 23, 42, .14) !important;
+          box-shadow: 3px 3px 0 #10b981, 0 8px 20px rgba(15, 23, 42, .12) !important;
         }
         #${this.id}[data-ohmytrends-state="done"] .ohmytrends-status__badge {
           background: #16a34a !important;
@@ -482,7 +476,7 @@ function installStatusOverlayScript(initialStatus: string): void {
         }
         #${this.id}[data-ohmytrends-state="error"] {
           border-color: #f97316 !important;
-          box-shadow: 5px 5px 0 #f97316, 0 14px 30px rgba(124, 45, 18, .14) !important;
+          box-shadow: 3px 3px 0 #f97316, 0 8px 20px rgba(124, 45, 18, .12) !important;
         }
         #${this.id}[data-ohmytrends-state="error"] .ohmytrends-status__badge {
           background: #fb923c !important;
@@ -494,43 +488,47 @@ function installStatusOverlayScript(initialStatus: string): void {
         }
         #${this.id} .ohmytrends-status__body {
           min-width: 0 !important;
+          max-height: calc(100vh - 64px) !important;
+          overflow: hidden !important;
         }
         #${this.id} .ohmytrends-status__brand {
-          margin-bottom: 4px !important;
+          margin-bottom: 2px !important;
           color: #10b981 !important;
-          font-size: 14px !important;
+          font-size: 10px !important;
           font-weight: 900 !important;
           letter-spacing: .12em !important;
         }
         #${this.id} .ohmytrends-status__title {
-          margin-bottom: 10px !important;
+          margin-bottom: 6px !important;
           color: #0f172a !important;
-          font-size: 18px !important;
+          font-size: 13px !important;
           font-weight: 800 !important;
+          line-height: 1.3 !important;
+          overflow-wrap: anywhere !important;
         }
         #${this.id} .ohmytrends-status__chips {
           display: flex !important;
           flex-wrap: wrap !important;
-          gap: 8px !important;
+          gap: 6px !important;
         }
         #${this.id} .ohmytrends-status__chips span {
           display: inline-flex !important;
           align-items: center !important;
-          height: 28px !important;
-          padding: 0 12px !important;
+          height: 20px !important;
+          padding: 0 8px !important;
           border: 1px solid rgba(16, 185, 129, .38) !important;
           border-radius: 999px !important;
           background: #ecfdf5 !important;
           color: #047857 !important;
-          font-size: 13px !important;
+          font-size: 10px !important;
           font-weight: 800 !important;
         }
         @keyframes ohmytrends-status-pulse {
           0%, 100% {
-            box-shadow: 5px 5px 0 #f97316, 0 14px 30px rgba(124, 45, 18, .14) !important;
+            box-shadow: 3px 3px 0 #f97316, 0 8px 20px rgba(124, 45, 18, .12) !important;
           }
           50% {
-            box-shadow: 5px 5px 0 #fb923c, 0 16px 36px rgba(124, 45, 18, .16) !important;
+            box-shadow: 3px 3px 0 #fb923c, 0 10px 24px rgba(124, 45, 18, .14) !important;
           }
         }
       `;

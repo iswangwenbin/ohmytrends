@@ -7,6 +7,7 @@ import {
   googleTimelineToTrends,
   redactGoogleApiUrl,
   selectActiveGoogleLoginPage,
+  selectGoogleTimelineCapture,
   stripGoogleJsonPrefix,
 } from "../src/google.js";
 import { loginWindowClosedMessage } from "../src/browser-utils.js";
@@ -30,7 +31,10 @@ describe("Google Trends helpers", () => {
     expect(googleOverviewFromTrends(["claude"], trends)[0]?.overallDailyAverage).toBe(25);
   });
 
-  test("builds Google Trends explore URL with multiple q params", () => {
+  test("builds Google Trends explore URL with comma-joined keywords", () => {
+    // Google Trends parses keywords from a single comma-separated `q` value
+    // (e.g. `?q=gpt,codex`). Repeated `q=` parameters are silently dropped and
+    // the page opens with no keyword, so this format is load-bearing.
     const url = new URL(googleExplorePageUrl({
       source: "google",
       url: "",
@@ -47,7 +51,8 @@ describe("Google Trends helpers", () => {
       area: "0",
     }));
 
-    expect(url.searchParams.getAll("q")).toEqual(["codex app", "claude", "gemini"]);
+    expect(url.searchParams.getAll("q")).toEqual(["codex app,claude,gemini"]);
+    expect(url.searchParams.get("q")).toBe("codex app,claude,gemini");
     expect(url.searchParams.get("geo")).toBe("US");
     expect(url.searchParams.get("date")).toBe("today 12-m");
   });
@@ -84,6 +89,26 @@ describe("Google Trends helpers", () => {
   test("finds Google widgets with suffixed ids", () => {
     expect(findGoogleWidget([{ id: "RELATED_QUERIES_0", token: "token", request: {} }], "RELATED_QUERIES")?.token)
       .toBe("token");
+  });
+
+  test("ignores empty captured timeline responses", () => {
+    expect(selectGoogleTimelineCapture([
+      {
+        url: "https://trends.google.com/trends/api/widgetdata/multiline",
+        response: { default: { timelineData: [] } },
+      },
+      {
+        url: "https://trends.google.com/trends/api/widgetdata/multiline?empty=1",
+        response: { default: { timelineData: [{ time: "1716336000", value: [], hasData: [] }] } },
+      },
+    ], ["gpt", "codex"])).toBeUndefined();
+
+    expect(selectGoogleTimelineCapture([
+      {
+        url: "https://trends.google.com/trends/api/widgetdata/multiline?ok=1",
+        response: { default: { timelineData: [{ time: "1716336000", value: [10, 20], hasData: [true, true] }] } },
+      },
+    ], ["gpt", "codex"])?.url).toContain("ok=1");
   });
 
   test("does not treat unrelated blank pages as an active Google login window", () => {

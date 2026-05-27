@@ -19,11 +19,15 @@ import {
 
 describe("main menu prompt helpers", () => {
   test("renders menu labels and descriptions", () => {
-    expect(labelFor("login", { baidu: false, google: false, ready: false }, "zh")).toBe("登录账号");
+    expect(labelFor("login", { baidu: false, google: false, ready: false }, "zh")).toBe("登录全部账号");
+    expect(labelFor("login-google", { baidu: false, google: false, ready: false }, "zh")).toBe("登录 Google 账号");
+    expect(labelFor("login-baidu", { baidu: false, google: false, ready: false }, "zh")).toBe("登录百度账号");
     expect(labelFor("get", { baidu: true, google: true, ready: true }, "zh")).toBe("通过 CLI 查询数据");
     expect(descriptionFor("serve", { baidu: true, google: true, ready: true }, "zh")).toContain("127.0.0.1:3000");
     expect(descriptionFor(undefined, undefined, "zh")).toBe("请选择一个操作。");
-    expect(labelFor("login", { baidu: false, google: false, ready: false }, "en")).toBe("Log in");
+    expect(labelFor("login", { baidu: false, google: false, ready: false }, "en")).toBe("Log in to all accounts");
+    expect(labelFor("login-google", { baidu: false, google: false, ready: false }, "en")).toBe("Log in to Google");
+    expect(labelFor("login-baidu", { baidu: false, google: false, ready: false }, "en")).toBe("Log in to Baidu");
     expect(labelFor("get", { baidu: true, google: true, ready: true }, "en")).toBe("Query in terminal");
   });
 
@@ -67,14 +71,24 @@ describe("main menu prompt helpers", () => {
   test("uses login as the first step before run actions", () => {
     expect(menuItemsFor({ baidu: false, google: false, ready: false }, "zh").map((item) => item.value)).toEqual([
       "login",
-      "import",
+      "login-google",
+      "login-baidu",
+    ]);
+    expect(menuItemsFor({ baidu: true, google: false, ready: false }, "zh").map((item) => item.value)).toEqual([
+      "login-google",
+      "skip-login",
+    ]);
+    expect(menuItemsFor({ baidu: false, google: true, ready: false }, "zh").map((item) => item.value)).toEqual([
+      "login-baidu",
+      "skip-login",
     ]);
     expect(menuItemsFor({ baidu: true, google: true, ready: true }, "zh").map((item) => item.value)).toEqual([
       "get",
       "serve",
     ]);
     expect(gateMessage({ baidu: true, google: false, ready: false }, "zh")).toContain("Google");
-    expect(authStepMessage({ baidu: true, google: false, ready: false }, "zh")).toContain("第一步");
+    expect(authStepMessage({ baidu: true, google: false, ready: false }, "zh")).not.toContain("第一步");
+    expect(authStepMessage({ baidu: true, google: false, ready: false }, "zh")).toContain("请先完成登录");
   });
 
   test("renders login status with stable symbols", () => {
@@ -92,9 +106,11 @@ describe("main menu prompt helpers", () => {
   });
 
   test("renders installer-style details", () => {
-    expect(detailFor("login", { baidu: false, google: false, ready: false }, "zh")).toContain("推荐");
+    expect(detailFor("login", { baidu: false, google: false, ready: false }, "zh")).not.toContain("第一次使用");
+    expect(detailFor("login-baidu", { baidu: false, google: true, ready: false }, "zh")).not.toContain("重新登录百度指数");
+    expect(detailFor("login-google", { baidu: true, google: false, ready: false }, "zh")).toContain("Google Trends");
     expect(detailFor("serve", { baidu: true, google: true, ready: true }, "zh")).toContain("127.0.0.1:3000");
-    expect(helpFor("login", { baidu: false, google: false, ready: false }, "zh")).toContain("◇ 登录准备");
+    expect(helpFor("login-baidu", { baidu: false, google: true, ready: false }, "zh")).toContain("◇ 登录准备");
   });
 
   test("groups import candidates by browser profile", () => {

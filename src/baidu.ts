@@ -56,6 +56,7 @@ export async function verifyBaiduLogin(options: Pick<Options, "profileDir" | "ti
       timeout: options.timeoutMs,
     });
     await page.waitForSelector("body", { timeout: options.timeoutMs });
+    await waitForBaiduHomeHydrated(page, options.timeoutMs);
     return await hasValidBaiduLogin(browser, page);
   } finally {
     await closeContextSafely(browser);
@@ -89,6 +90,7 @@ export async function loginBaidu(options: Options): Promise<void> {
     await page.waitForSelector("body", { timeout: options.timeoutMs });
     emitStatus(options, "正在检查百度登录状态...");
     await setPageStatus(page, true, "正在检查百度登录状态...");
+    await waitForBaiduHomeHydrated(page, options.timeoutMs);
     if (await hasValidBaiduLogin(browser, page)) {
       logStatus(options, "百度登录状态已就绪。");
       emitStatus(options, "百度登录状态已就绪。");
@@ -147,6 +149,7 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
       timeout: options.timeoutMs,
     });
     await page.waitForSelector("body", { timeout: options.timeoutMs });
+    await waitForBaiduHomeHydrated(page, options.timeoutMs);
     if (options.headless && !await hasValidBaiduLogin(browser, page)) {
       runtimeInfo("百度登录状态无效，正在打开可视浏览器用于重新登录...");
       await closeContextSafely(browser);
@@ -159,6 +162,32 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
       : undefined;
     if (apiFirstOutput) return apiFirstOutput;
 
+    try {
+      return await collectBaiduIndexViaPageMode(page, browser, options, intercepted, responseCaptureTasks);
+    } catch (error) {
+      if (options.baiduMode === "api") throw error;
+      runtimeInfo(`百度 page 模式采集失败，回退到 api 模式：${error instanceof Error ? error.message : String(error)}`);
+      await setPageStatus(page, !options.headless, "百度 page 模式采集失败，正在回退到接口采集...");
+      const apiFallbackOutput = await tryCollectBaiduIndexFromApi(page, browser, options, intercepted);
+      if (apiFallbackOutput) return apiFallbackOutput;
+      throw error;
+    }
+  } finally {
+    if (options.keepOpen && !options.headless && hasOpenPages(browser)) {
+      keepContextOpenUntilExit(browser, "已设置 --keep-open true，保留百度浏览器窗口。");
+    } else {
+      await closeContextSafely(browser);
+    }
+  }
+}
+
+async function collectBaiduIndexViaPageMode(
+  page: PageLike,
+  browser: BrowserContextLike,
+  options: Options,
+  intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
+  responseCaptureTasks: Set<Promise<void>>,
+): Promise<CollectOutput> {
     if (page.url().includes("#/trend")) {
       await page.goto(DEFAULT_HOME_URL, {
         waitUntil: "domcontentloaded",
@@ -167,6 +196,9 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
       await page.waitForSelector("body", { timeout: options.timeoutMs });
     }
     await setPageStatus(page, !options.headless, `正在查询百度指数：${options.words.join(", ")}`);
+    // Mirror the Google page-mode pattern: arm response waiters first, install
+    // route guards, then jump straight to the trend URL. The API responses
+    // themselves are our readiness signal — no separate DOM polling needed.
     const initialApiResponses = waitForBaiduApiResponses(
       page,
       ["search", "feed"],
@@ -174,15 +206,21 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
       intercepted,
       responseCaptureTasks,
     );
-    await submitHomeSearch(page, options);
     await protectBaiduIndexRoute(page, options.url);
     await lockBaiduIndexRoute(page, options.url);
+    await page.goto(options.url, {
+      waitUntil: "domcontentloaded",
+      timeout: options.timeoutMs,
+    });
     await setPageStatus(page, !options.headless, "正在等待百度指数趋势页...");
-    await waitForIndexPage(page, options.loginTimeoutMs);
-    await page.waitForTimeout(500);
     await initialApiResponses;
     await flushBaiduResponseCaptures(responseCaptureTasks);
-    let unavailableWords = await detectUnavailableWords(page, options.words);
+    // If the API responses already cover every requested keyword, the page may
+    // briefly show a "未被收录" hint banner during initial render that gets
+    // wiped once the chart hydrates. Trust the API and skip the DOM check in
+    // that case.
+    const apiCoversAllWords = interceptedHasAllWords(intercepted, options.words);
+    let unavailableWords = apiCoversAllWords ? [] : await detectUnavailableWords(page, options.words);
     if (unavailableWords.length > 0) {
       const message = unavailableWordsMessage(unavailableWords);
       runtimeWarn(message);
@@ -208,8 +246,6 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
           waitUntil: "domcontentloaded",
           timeout: options.timeoutMs,
         });
-        await waitForIndexPage(page, options.loginTimeoutMs);
-        await page.waitForTimeout(500);
         await retryApiResponses;
         await flushBaiduResponseCaptures(responseCaptureTasks);
       }
@@ -242,8 +278,6 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
             waitUntil: "domcontentloaded",
             timeout: options.timeoutMs,
           });
-          await waitForIndexPage(page, options.loginTimeoutMs);
-          await page.waitForTimeout(500);
           await retryApiResponses;
           await flushBaiduResponseCaptures(responseCaptureTasks);
           overviewResult = await extractBaiduOverviews(page, retryOptions.words);
@@ -297,13 +331,6 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
     }
 
     return buildBaiduCollectOutput(options, page.url(), searchResult, feedResult, missingWords, noDataReason);
-  } finally {
-    if (options.keepOpen && !options.headless && hasOpenPages(browser)) {
-      keepContextOpenUntilExit(browser, "已设置 --keep-open true，保留百度浏览器窗口。");
-    } else {
-      await closeContextSafely(browser);
-    }
-  }
 }
 
 export function hasBaiduLoginInProfile(profileDir: string): boolean {
@@ -688,6 +715,16 @@ async function ensureLoggedIn(context: BrowserContextLike, page: PageLike, optio
     timeout: options.timeoutMs,
   });
   await page.waitForSelector("body", { timeout: options.timeoutMs });
+  await waitForBaiduHomeHydrated(page, options.timeoutMs);
+
+  // Defense in depth: after we navigate back to index.baidu.com, the actual
+  // logged-in UI either appears or the page redirects to a login prompt. If
+  // the login state we detected was transient (e.g., the login window was
+  // closed mid-flow and an intermediate redirect was misread as success),
+  // re-verifying here catches it instead of continuing into garbage data.
+  if (!await hasValidBaiduLogin(context, page)) {
+    throw new Error("百度登录验证失败：返回首页后仍未检测到有效登录，请重新发起登录。");
+  }
 }
 
 async function waitForBaiduLogin(
@@ -799,6 +836,13 @@ async function flushBaiduResponseCaptures(tasks: Set<Promise<void>>): Promise<vo
 
 async function isLoggedInFromPage(page: PageLike): Promise<boolean> {
   try {
+    // Login state is only observable on index.baidu.com itself. Mid-login the
+    // page may be on passport.baidu.com, accounts.baidu.com, about:blank, or
+    // in a transient redirect — in any of those states we cannot tell from the
+    // body text whether the user is actually logged in.
+    const url = safePageUrl(page);
+    if (!/index\.baidu\.com/.test(url)) return false;
+
     const text = await page.locator("body").innerText({ timeout: 2_000 });
     return isBaiduLoggedInText(text);
   } catch (error) {
@@ -807,17 +851,60 @@ async function isLoggedInFromPage(page: PageLike): Promise<boolean> {
   }
 }
 
+/**
+ * Index.baidu.com is a React SPA — `body.innerText` right after
+ * `domcontentloaded` is often a skeleton or empty. Poll directly for hydrated
+ * content rather than waiting on `networkidle` (Baidu fires periodic analytics
+ * that keep the network busy long after the UI is ready). Bounded so we never
+ * block the verification flow for long.
+ */
+async function waitForBaiduHomeHydrated(page: PageLike, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + Math.min(timeoutMs, 4_000);
+  while (Date.now() < deadline) {
+    try {
+      const text = await page.locator("body").innerText({ timeout: 800 });
+      const normalized = text.replace(/\s+/g, "");
+      // Once nav + main content are rendered the page easily clears 120 chars.
+      // 80 is a conservative floor that still rejects skeleton states.
+      if (normalized.length >= 80) return;
+    } catch {
+      // ignore; try again
+    }
+    await page.waitForTimeout(150);
+  }
+}
+
 async function hasValidBaiduLogin(context: BrowserContextLike, page: PageLike): Promise<boolean> {
   return await hasBaiduLoginCookie(context) && await isLoggedInFromPage(page);
 }
 
 export function isBaiduLoggedInText(text: string): boolean {
-  return !isBaiduLoginPromptText(text);
+  const normalized = text.replace(/\s+/g, "");
+  // Require substantial page content so we don't accept an empty/about:blank/
+  // mid-redirect page as "logged in" by accident.
+  if (normalized.length < 30) return false;
+  if (isBaiduLoginPromptText(text)) return false;
+  // If the dropdown rendered into innerText, trust the explicit logout link.
+  if (/退出登录|退出账号/.test(normalized)) return true;
+  // Otherwise look for a bare "登录" / "注册" CTA — those only appear in the
+  // top nav when the user is signed out. The logged-in nav shows the user's
+  // avatar/name (and the logout link is folded into a hover dropdown that
+  // isn't included in innerText).
+  if (/登录|注册/.test(normalized)) return false;
+  return true;
 }
 
 export function isBaiduLoginPromptText(text: string): boolean {
   const normalized = text.replace(/\s+/g, "");
   return /扫码登录|用户名登录|密码登录|短信登录|立即登录|登录百度账号|请登录|请先登录|安全验证/.test(normalized);
+}
+
+function safePageUrl(page: PageLike): string {
+  try {
+    return page.url();
+  } catch {
+    return "";
+  }
 }
 
 async function hasBaiduLoginCookie(context: BrowserContextLike): Promise<boolean> {
@@ -1019,8 +1106,9 @@ async function findUnavailableWordsByProbing(
       waitUntil: "domcontentloaded",
       timeout: options.timeoutMs,
     });
-    await waitForIndexPage(page, options.loginTimeoutMs);
-    await page.waitForTimeout(500);
+    // Probing reads body text for `关键词X未被收录`, so we need enough
+    // hydrated content but not the full waitForIndexPage polling loop.
+    await waitForBaiduHomeHydrated(page, options.timeoutMs);
 
     const explicit = await detectUnavailableWords(page, [word]);
     if (explicit.includes(word)) {
@@ -1042,6 +1130,14 @@ function isProbablyIndexPage(text: string): boolean {
 
 function isProbablyLogin(text: string): boolean {
   return /登录|扫码|验证码|帐号|账号|百度一下/.test(text) && !isProbablyIndexPage(text);
+}
+
+function interceptedHasAllWords(
+  intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
+  words: string[],
+): boolean {
+  const responses = [...(intercepted.search || []), ...(intercepted.feed || [])];
+  return responses.some((response) => hasWords(response, words));
 }
 
 function hasWords(response: SearchIndexResponse, words: string[]): boolean {

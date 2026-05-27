@@ -8,7 +8,7 @@ import {
   DEFAULT_WORDS,
 } from "./config.js";
 import { readLanguage } from "./i18n.js";
-import type { BaiduCollectMode, Options, OutputFormat, Source, SourceOption } from "./types.js";
+import type { BaiduCollectMode, GoogleCollectMode, Options, OutputFormat, Source, SourceOption } from "./types.js";
 
 const DEFAULT_RANGE = "30d";
 const VALID_RANGES = ["1h", "4h", "1d", "7d", "30d", "90d", "180d", "1y", "5y", "all"] as const;
@@ -58,6 +58,7 @@ export function readOptions(args: string[]): Options {
     range: readGoogleRange(args, explicitDateOptions),
     rangeLabel,
     baiduMode: readBaiduCollectMode(args),
+    googleMode: readGoogleCollectMode(args),
     geo: readFlag(args, "--geo") || "",
     area: readFlag(args, "--area") || "0",
   };
@@ -67,6 +68,12 @@ function readBaiduCollectMode(args: string[]): BaiduCollectMode {
   const mode = readFlag(args, "--baidu-mode") || process.env.OHMYTRENDS_BAIDU_MODE || "page";
   if (mode === "page" || mode === "api") return mode;
   throw new Error(`Invalid --baidu-mode: ${mode}. Expected page or api`);
+}
+
+function readGoogleCollectMode(args: string[]): GoogleCollectMode {
+  const mode = readFlag(args, "--google-mode") || process.env.OHMYTRENDS_GOOGLE_MODE || "page";
+  if (mode === "page" || mode === "api") return mode;
+  throw new Error(`Invalid --google-mode: ${mode}. Expected page or api`);
 }
 
 function readOutputFormat(args: string[]): OutputFormat {
@@ -137,7 +144,7 @@ function hasFlag(args: string[], name: string): boolean {
 
 function splitCsv(value: string | undefined): string[] {
   return (value || "")
-    .split(",")
+    .split(/[,\uFF0C\u3001\uFF1B;]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

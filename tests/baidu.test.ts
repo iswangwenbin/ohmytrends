@@ -68,6 +68,51 @@ describe("Baidu index decoding", () => {
 
   test("detects Baidu login prompt text without blocking normal account pages", () => {
     expect(isBaiduLoginPromptText("扫码登录 用户名登录 立即登录")).toBe(true);
-    expect(isBaiduLoggedInText("认证微信 帮助中心 ps5fans 百度指数")).toBe(true);
+    // Logged-in pages have plenty of content (chart, controls, user menu, etc.)
+    // — well above the min-length threshold that rejects blank/transient pages.
+    expect(isBaiduLoggedInText(
+      "百度指数 趋势研究 我的指数 行业排行 词包管理 ps5fans 个人中心 设置 退出 帮助中心 反馈 认证微信"
+    )).toBe(true);
+  });
+
+  test("rejects empty or near-empty pages as logged in", () => {
+    // about:blank or transient redirect — body text is empty or trivially
+    // short. We must not interpret the absence of login prompts as success.
+    expect(isBaiduLoggedInText("")).toBe(false);
+    expect(isBaiduLoggedInText("   \n\t  ")).toBe(false);
+    expect(isBaiduLoggedInText("Loading...")).toBe(false);
+  });
+
+  test("rejects the logged-out home page even when no modal phrases are visible", () => {
+    // Regression: the logged-out index.baidu.com home shows a bare "登录"
+    // CTA in the top nav but none of the modal-only phrases (扫码登录,
+    // 立即登录, ...). The text is long, on the right domain, has no negative
+    // markers — but is still logged out.
+    const loggedOutHome = [
+      "百度指数 趋势研究 需求图谱 资讯指数 人群画像 全部产品 帮助",
+      "热搜词 实时热点 行业榜单 排行榜 城市榜",
+      "登录 注册 反馈 关于我们 联系我们 加入我们",
+      "请输入关键词 搜索",
+    ].join(" ");
+    expect(loggedOutHome.length).toBeGreaterThan(30);
+    expect(isBaiduLoginPromptText(loggedOutHome)).toBe(false);
+    expect(isBaiduLoggedInText(loggedOutHome)).toBe(false);
+  });
+
+  test("accepts logged-in home where the logout link is hidden in a dropdown", () => {
+    // Regression: the logged-in index.baidu.com home shows the user's avatar
+    // / username (e.g. "ps5fans") in the top nav, but `退出登录` lives in a
+    // collapsed dropdown that doesn't appear in `body.innerText`. We must
+    // not require an explicit positive marker — absence of any "登录" /
+    // "注册" CTA is sufficient evidence of being signed in.
+    const loggedInHome = [
+      "百度指数 趋势研究 需求图谱 资讯指数 人群画像 全部产品",
+      "限时福利 关注微信 帮助中心 ps5fans",
+      "搜索趋势 资讯指数 热点榜单",
+      "请输入关键词 搜索 添加对比",
+    ].join(" ");
+    expect(loggedInHome.length).toBeGreaterThan(30);
+    expect(isBaiduLoginPromptText(loggedInHome)).toBe(false);
+    expect(isBaiduLoggedInText(loggedInHome)).toBe(true);
   });
 });

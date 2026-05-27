@@ -18,7 +18,7 @@ import { importableSources, importBrowserSession, scanBrowserProfiles } from "./
 import { toUnifiedMultiSourceOutput, toUnifiedOutput } from "./unified-output.js";
 import type { Options, OutputFormat, Source, SourceOption, TerminalLanguage } from "./types.js";
 
-type MenuAction = "login" | "import" | "get" | "serve" | "quit";
+type MenuAction = "login" | "login-google" | "login-baidu" | "skip-login" | "import" | "get" | "serve" | "quit";
 
 type MenuItem = {
   label: string;
@@ -32,6 +32,21 @@ export type LoginGate = {
   google: boolean;
   ready: boolean;
 };
+
+function readyFromSources(baidu: boolean, google: boolean): boolean {
+  return baidu && google;
+}
+
+function hasAnyLogin(gate: LoginGate): boolean {
+  return gate.baidu || gate.google;
+}
+
+function sourceForGate(gate: LoginGate): SourceOption {
+  if (gate.baidu && gate.google) return "all";
+  if (gate.baidu) return "baidu";
+  if (gate.google) return "google";
+  return "all";
+}
 
 export async function runMainMenuPrompts(): Promise<void> {
   if (!isInteractivePromptAvailable()) {
@@ -51,6 +66,7 @@ export async function runMainMenuPrompts(): Promise<void> {
   while (!loginGate.ready) {
     const action = await selectAuthStepAction(loginGate, lang);
     if (!action || action === "quit" || process.exitCode) return;
+    if (action === "skip-login" && hasAnyLogin(loginGate)) break;
     await runMenuAction(action, lang);
     if (process.exitCode) return;
     loginGate = await detectVerifiedLoginGate();
@@ -66,14 +82,16 @@ export async function runMainMenuPrompts(): Promise<void> {
 
 async function selectAuthStepAction(loginGate: LoginGate, lang: TerminalLanguage): Promise<MenuAction | undefined> {
   const copy = menuCopy(lang);
+  const items = authStepItemsFor(loginGate, lang);
+  note(authStepMessage(loginGate, lang), copy.authStepMessage);
   const action = await select<MenuAction>({
-    message: authStepMessage(loginGate, lang),
-    options: authStepItemsFor(lang).map((item) => ({
+    message: copy.authStepSelectMessage,
+    options: items.map((item) => ({
       label: item.label,
-      hint: item.value === "login" ? copy.recommended : item.hint,
+      hint: "",
       value: item.value,
     })),
-    initialValue: "login",
+    initialValue: items[0]?.value,
   });
   if (isCancel(action)) {
     cancel(copy.exited);
@@ -87,7 +105,7 @@ async function selectReadyStepAction(loginGate: LoginGate, lang: TerminalLanguag
   note([
     ...loginStatusLines(loginGate, lang),
     "",
-    copy.readyNote,
+    copy.readyNote(sourceForGate(loginGate)),
   ].join("\n"), copy.readyTitle);
   const action = await select<MenuAction>({
     message: copy.readyStepMessage,
@@ -131,12 +149,23 @@ async function runMenuAction(action: MenuAction | undefined, lang: TerminalLangu
     await runLoginPrompts([]);
     return "done";
   }
+  if (action === "login-google") {
+    await runLoginPrompts(["--source", "google"]);
+    return "done";
+  }
+  if (action === "login-baidu") {
+    await runLoginPrompts(["--source", "baidu"]);
+    return "done";
+  }
+  if (action === "skip-login") {
+    return "back";
+  }
   if (action === "import") {
     await runImportSessionPrompts();
     return "done";
   }
   if (action === "get") {
-    return await runTerminalQueryPrompts(lang);
+    return await runTerminalQueryPrompts(lang, detectLoginGate());
   }
   if (action === "serve") {
     await startServer(["--host", "127.0.0.1", "--port", "3000", "--lang", lang]);
@@ -146,6 +175,9 @@ async function runMenuAction(action: MenuAction | undefined, lang: TerminalLangu
 
 export function actionMessage(action: MenuAction): string {
   if (action === "login") return "准备进入 login 登录向导...";
+  if (action === "login-google") return "准备进入 Google login 登录向导...";
+  if (action === "login-baidu") return "准备进入百度 login 登录向导...";
+  if (action === "skip-login") return "跳过补全登录，进入下一步...";
   if (action === "import") return "准备扫描本地浏览器会话...";
   if (action === "get") return "get 采集表单后续会加入；当前请使用命令参数。";
   if (action === "serve") return "正在启动 HTTP API 服务...";
@@ -157,13 +189,13 @@ export function descriptionFor(
   gate?: LoginGate,
   lang: TerminalLanguage = readLanguage(),
 ): string {
-  const sourceItems = gate ? menuItemsFor(gate, lang) : [...readyStepItemsFor(lang), ...authStepItemsFor(lang)];
+  const sourceItems = gate ? menuItemsFor(gate, lang) : [...readyStepItemsFor(lang), ...authStepItemsFor(undefined, lang)];
   const item = sourceItems.find((entry) => entry.value === action);
   return item ? item.description : menuCopy(lang).chooseAction;
 }
 
 export function labelFor(action: MenuAction | undefined, gate?: LoginGate, lang: TerminalLanguage = readLanguage()): string {
-  const sourceItems = gate ? menuItemsFor(gate, lang) : [...readyStepItemsFor(lang), ...authStepItemsFor(lang)];
+  const sourceItems = gate ? menuItemsFor(gate, lang) : [...readyStepItemsFor(lang), ...authStepItemsFor(undefined, lang)];
   return sourceItems.find((item) => item.value === action)?.label || menuCopy(lang).none;
 }
 
@@ -194,8 +226,8 @@ function sectionLine(label: string): string {
   return `◇ ${label}`;
 }
 
-async function runTerminalQueryPrompts(lang: TerminalLanguage): Promise<MenuActionResult> {
-  const source: SourceOption = "all";
+async function runTerminalQueryPrompts(lang: TerminalLanguage, gate: LoginGate = detectLoginGate()): Promise<MenuActionResult> {
+  const source = sourceForGate(gate);
   const range = "30d";
   const geoValue = "";
 
@@ -445,8 +477,8 @@ async function runImportSessionPrompts(): Promise<void> {
       runtimeInfo(`- ${choice.label}`);
     }
     runtimeInfo(lang === "zh"
-      ? "请在交互式终端运行 ohmytrends 后选择“导入本地浏览器会话”。"
-      : "Run ohmytrends in an interactive terminal and choose Import local browser session.");
+      ? "本地浏览器会话导入入口当前已隐藏，请使用 ohmytrends login 手动登录。"
+      : "Local browser session import is currently hidden. Use ohmytrends login instead.");
     return;
   }
 
@@ -573,7 +605,7 @@ export function detectLoginGate(): LoginGate {
   return {
     baidu,
     google,
-    ready: baidu && google,
+    ready: readyFromSources(baidu, google),
   };
 }
 
@@ -603,7 +635,7 @@ export async function detectVerifiedLoginGate(): Promise<LoginGate> {
       : false,
   ]);
 
-  const verifiedGate = { baidu, google, ready: baidu && google };
+  const verifiedGate = { baidu, google, ready: readyFromSources(baidu, google) };
   if (verifiedGate.ready) {
     spin?.stop(copy.loginVerified);
   } else {
@@ -620,7 +652,7 @@ function defaultProfileDirFor(source: Source): string {
 }
 
 export function menuItemsFor(gate: LoginGate, lang: TerminalLanguage = readLanguage()): MenuItem[] {
-  return gate.ready ? readyStepItemsFor(lang) : authStepItemsFor(lang);
+  return gate.ready ? readyStepItemsFor(lang) : authStepItemsFor(gate, lang);
 }
 
 export function gateMessage(gate: LoginGate, lang: TerminalLanguage = readLanguage()): string {
@@ -631,8 +663,8 @@ export function gateMessage(gate: LoginGate, lang: TerminalLanguage = readLangua
     gate.google ? "" : "Google",
   ].filter(Boolean).join("、");
   return lang === "zh"
-    ? `缺少 ${missing} 登录状态，请先登录或导入本地浏览器会话。`
-    : `Missing ${missing} login state. Please log in or import a local browser session first.`;
+    ? `缺少 ${missing} 登录状态，请先登录。`
+    : `Missing ${missing} login state. Please log in first.`;
 }
 
 function isInteractivePromptAvailable(): boolean {
@@ -647,9 +679,9 @@ function isInteractivePromptAvailable(): boolean {
 export function authStepMessage(gate: LoginGate, lang: TerminalLanguage = readLanguage()): string {
   const copy = menuCopy(lang);
   return [
-    copy.authStepMessage,
     ...loginStatusLines(gate, lang),
     copy.authStepHint,
+    "",
   ].join("\n");
 }
 
@@ -726,38 +758,80 @@ function isSource(value: string | undefined): value is Source {
   return value === "baidu" || value === "google";
 }
 
-function authStepItemsFor(lang: TerminalLanguage): MenuItem[] {
+function authStepItemsFor(gate: LoginGate | undefined, lang: TerminalLanguage): MenuItem[] {
+  const needsBaidu = gate ? !gate.baidu : true;
+  const needsGoogle = gate ? !gate.google : true;
   if (lang === "zh") {
-    return [
-      {
-        label: "登录账号",
+    const items: MenuItem[] = [];
+    if (needsBaidu && needsGoogle) {
+      items.push({
+        label: "登录全部账号",
         value: "login",
-        description: "打开登录向导，按顺序完成百度和 Google 登录。",
-        hint: "推荐：适合第一次使用，会打开浏览器让你手工登录。",
-      },
-      {
-        label: "导入本地浏览器会话",
-        value: "import",
-        description: "用户确认后扫描 Chrome/Edge/Arc/Brave 等浏览器，并导入已登录身份。",
-        hint: "只在你选择后扫描本机浏览器 profile，不会启动时自动扫描。",
-      },
-    ];
+        description: "依次完成百度和 Google 登录。",
+        hint: "",
+      });
+    }
+    if (needsGoogle) {
+      items.push({
+        label: "登录 Google 账号",
+        value: "login-google",
+        description: "只打开 Google Trends 登录向导。",
+        hint: "",
+      });
+    }
+    if (needsBaidu) {
+      items.push({
+        label: "登录百度账号",
+        value: "login-baidu",
+        description: "只打开百度指数登录向导。",
+        hint: "",
+      });
+    }
+    if (gate && hasAnyLogin(gate)) {
+      items.push({
+        label: "跳过，进入下一步",
+        value: "skip-login",
+        description: "先使用已登录的数据源继续。",
+        hint: "",
+      });
+    }
+    return items;
   }
 
-  return [
-    {
-      label: "Log in",
+  const items: MenuItem[] = [];
+  if (needsBaidu && needsGoogle) {
+    items.push({
+      label: "Log in to all accounts",
       value: "login",
-      description: "Open the login wizard and complete Baidu and Google login in order.",
-      hint: "Recommended for first-time use. It opens a browser for manual login.",
-    },
-    {
-      label: "Import local browser session",
-      value: "import",
-      description: "Scan Chrome/Edge/Arc/Brave after confirmation and import an existing login session.",
-      hint: "Only scans local browser profiles after you choose this option.",
-    },
-  ];
+      description: "Complete Baidu and Google login in sequence.",
+      hint: "",
+    });
+  }
+  if (needsGoogle) {
+    items.push({
+      label: "Log in to Google",
+      value: "login-google",
+      description: "Open only the Google Trends login wizard.",
+      hint: "",
+    });
+  }
+  if (needsBaidu) {
+    items.push({
+      label: "Log in to Baidu",
+      value: "login-baidu",
+      description: "Open only the Baidu Index login wizard.",
+      hint: "",
+    });
+  }
+  if (gate && hasAnyLogin(gate)) {
+    items.push({
+      label: "Skip to next step",
+      value: "skip-login",
+      description: "Continue with the source that is already logged in.",
+      hint: "",
+    });
+  }
+  return items;
 }
 
 function readyStepItemsFor(lang: TerminalLanguage): MenuItem[] {
@@ -802,7 +876,9 @@ function menuCopy(lang: TerminalLanguage) {
       recommended: "推荐",
       exited: "已退出 ohmytrends。",
       readyTitle: "准备就绪",
-      readyNote: "登录已完成，现在可以选择运行方式。",
+      readyNote: (source: SourceOption) => source === "all"
+        ? "登录已完成，现在可以选择运行方式。"
+        : `已登录 ${sourceLabel(source, "zh")}，现在可以选择运行方式。`,
       readyStepMessage: "第二步：选择运行方式",
       initMode: "初始化模式",
       baiduLogin: "百度登录",
@@ -835,10 +911,11 @@ function menuCopy(lang: TerminalLanguage) {
       queryFailed: "查询失败",
       loginVerified: "登录状态已验证",
       needLogin: "需要准备登录状态",
-      profileVerifyFailed: (source: string) => `${source} profile 中有登录痕迹，但实际页面验证失败，请重新登录或重新导入。`,
+      profileVerifyFailed: (source: string) => `${source} profile 中有登录痕迹，但实际页面验证失败，请重新登录。`,
       gateReady: "登录状态已就绪，可以采集数据或启动 API。",
       authStepMessage: "第一步：准备登录状态",
-      authStepHint: "请先完成登录或导入本地浏览器会话。",
+      authStepSelectMessage: "请选择登录方式",
+      authStepHint: "请先完成登录。",
       authStepItemsImportLabel: "导入本地浏览器会话",
       loggedIn: "已登录",
       notLoggedIn: "未登录",
@@ -851,7 +928,9 @@ function menuCopy(lang: TerminalLanguage) {
     recommended: "recommended",
     exited: "Exited ohmytrends.",
     readyTitle: "Ready",
-    readyNote: "Login is complete. Choose how you want to run ohmytrends.",
+    readyNote: (source: SourceOption) => source === "all"
+      ? "Login is complete. Choose how you want to run ohmytrends."
+      : `${sourceLabel(source, "en")} is logged in. Choose how you want to run ohmytrends.`,
     readyStepMessage: "Step 2: Choose run mode",
     initMode: "Onboarding mode",
     baiduLogin: "Baidu login",
@@ -884,10 +963,11 @@ function menuCopy(lang: TerminalLanguage) {
     queryFailed: "Query failed",
     loginVerified: "Login state verified",
     needLogin: "Login setup required",
-    profileVerifyFailed: (source: string) => `${source} profile has login traces, but page verification failed. Please log in again or re-import.`,
+    profileVerifyFailed: (source: string) => `${source} profile has login traces, but page verification failed. Please log in again.`,
     gateReady: "Login state is ready. You can collect data or start the API.",
     authStepMessage: "Step 1: Prepare login state",
-    authStepHint: "Complete login or import a local browser session first.",
+    authStepSelectMessage: "Choose a login method",
+    authStepHint: "Complete login first.",
     authStepItemsImportLabel: "Import local browser session",
     loggedIn: "logged in",
     notLoggedIn: "not logged in",

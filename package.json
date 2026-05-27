@@ -20,11 +20,12 @@
     "build": "bun run build:css && bun build ./src/cli.ts --compile --minify --external chromium-bidi --outfile ./bin/ohmytrends",
     "build:css": "tailwindcss --input ./src/tailwind.css --output ./src/generated/tailwind.css --minify",
     "ci": "bun run build:css && bun run typecheck && bun test",
-    "dev": "OHMYTRENDS_LANG=zh bun src/cli.ts",
-    "dev:debug": "OHMYTRENDS_LANG=zh OHMYTRENDS_HEADLESS=false OHMYTRENDS_KEEP_OPEN=true bun src/cli.ts",
+    "dev": "OHMYTRENDS_LANG=zh OHMYTRENDS_GOOGLE_MODE=page bun src/cli.ts",
+    "dev:debug": "OHMYTRENDS_LANG=zh OHMYTRENDS_GOOGLE_MODE=page OHMYTRENDS_HEADLESS=false OHMYTRENDS_KEEP_OPEN=true bun src/cli.ts",
     "get": "bun src/cli.ts get",
     "prepack": "bun run ci",
     "release:check": "bun scripts/release-check.ts && bun run build && bun pm pack --dry-run",
+    "start": "bun src/cli.ts serve",
     "test": "bun test",
     "typecheck": "bun x tsc --noEmit"
   },
@@ -58,7 +59,7 @@
   "dependencies": {
     "@clack/prompts": "^1.4.0",
     "@floating-ui/dom": "^1.7.6",
-    "cloakbrowser": "^0.3.26",
+    "cloakbrowser": "^0.3.31",
     "elysia": "^1.4.28",
     "figlet": "^1.11.0"
   },

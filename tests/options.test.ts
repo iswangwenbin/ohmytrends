@@ -63,10 +63,33 @@ describe("readOptions", () => {
     expect(options.baiduMode).toBe("page");
   });
 
+  test("splits keywords with full-width punctuation", () => {
+    const options = readOptions(["--source", "google", "--words", "gpt，codex、claude；gemini"]);
+
+    expect(options.words).toEqual(["gpt", "codex", "claude", "gemini"]);
+  });
+
   test("reads Baidu collection mode", () => {
     expect(readOptions(["--source", "baidu"]).baiduMode).toBe("page");
     expect(readOptions(["--source", "baidu", "--baidu-mode", "api"]).baiduMode).toBe("api");
     expect(() => readOptions(["--source", "baidu", "--baidu-mode", "fast"])).toThrow("Invalid --baidu-mode");
+  });
+
+  test("reads Google collection mode", () => {
+    expect(readOptions(["--source", "google"]).googleMode).toBe("page");
+    expect(readOptions(["--source", "google", "--google-mode", "api"]).googleMode).toBe("api");
+    expect(() => readOptions(["--source", "google", "--google-mode", "fast"])).toThrow("Invalid --google-mode");
+  });
+
+  test("reads Google collection mode from environment", () => {
+    const previous = process.env.OHMYTRENDS_GOOGLE_MODE;
+    try {
+      process.env.OHMYTRENDS_GOOGLE_MODE = "api";
+      expect(readOptions(["--source", "google"]).googleMode).toBe("api");
+    } finally {
+      if (previous === undefined) delete process.env.OHMYTRENDS_GOOGLE_MODE;
+      else process.env.OHMYTRENDS_GOOGLE_MODE = previous;
+    }
   });
 
   test("reads dev browser mode defaults from environment variables", () => {

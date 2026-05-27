@@ -22,6 +22,7 @@ type ApiRequest = {
   loginTimeoutMs?: number;
   lang?: TerminalLanguage;
   baiduMode?: string;
+  googleMode?: string;
 };
 
 export async function startServer(args: string[]): Promise<void> {
@@ -110,6 +111,7 @@ function argsFromRequest(input: ApiRequest | Record<string, unknown>): string[] 
   pushNumber(args, "--login-timeout-ms", input.loginTimeoutMs);
   pushString(args, "--lang", input.lang);
   pushString(args, "--baidu-mode", input.baiduMode);
+  pushString(args, "--google-mode", input.googleMode);
   return args;
 }
 
@@ -127,12 +129,16 @@ function pushWords(args: string[], value: unknown): void {
 
 function normalizeWords(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean);
+    return value.flatMap((item) => splitWords(String(item)));
   }
   if (typeof value === "string") {
-    return value.split(",").map((word) => word.trim()).filter(Boolean);
+    return splitWords(value);
   }
-  return [String(value).trim()].filter(Boolean);
+  return splitWords(String(value));
+}
+
+function splitWords(value: string): string[] {
+  return value.split(/[,\uFF0C\u3001\uFF1B;]+/).map((word) => word.trim()).filter(Boolean);
 }
 
 function pushBoolean(args: string[], flag: string, value: unknown): void {
@@ -485,11 +491,15 @@ function renderExamplePage(): string {
       return new URL(buildUrl(), window.location.origin).toString();
     }
 
+    function splitWords(value) {
+      return String(value).split(/[,，、；;]+/).map(function (word) { return word.trim(); }).filter(Boolean);
+    }
+
     function requestPayload() {
       const data = new FormData(form);
       const payload = {
         source: data.get("source"),
-        words: String(data.get("words") || "").split(",").map((word) => word.trim()).filter(Boolean),
+        words: splitWords(String(data.get("words") || "")),
         range: data.get("range")
       };
       const geo = String(data.get("geo") || "").trim();

@@ -3,6 +3,7 @@ export type SourceOption = Source | "all";
 export type OutputFormat = "table" | "json";
 export type TerminalLanguage = "zh" | "en";
 export type BaiduCollectMode = "page" | "api";
+export type GoogleCollectMode = "page" | "api";
 
 export type SearchIndexResponse = {
   status?: number;
@@ -123,6 +124,7 @@ export type Options = {
   range?: string;
   rangeLabel?: string;
   baiduMode: BaiduCollectMode;
+  googleMode: GoogleCollectMode;
   geo: string;
   area: string;
   onStatus?: (message: string) => void;
@@ -185,6 +187,7 @@ declare global {
 export type ResponseLike = {
   url(): string;
   json(): Promise<unknown>;
+  text?(): Promise<string>;
 };
 
 export type RouteLike = {
