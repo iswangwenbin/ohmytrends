@@ -1,14 +1,18 @@
 import { Elysia } from "elysia";
+import { DEFAULT_QUEUE_DB } from "./config.js";
 import tailwindCss from "./generated/tailwind.css" with { type: "text" };
 import { readLanguage } from "./i18n.js";
+import { TrendJobQueue } from "./job-queue.js";
 import { runtimeInfo } from "./logger.js";
 import { readFlag, readOptions } from "./options.js";
 import { collectUnified } from "./runner.js";
-import type { SourceOption, TerminalLanguage } from "./types.js";
+import type { Options, SourceOption, TerminalLanguage } from "./types.js";
+import type { UnifiedMultiSourceOutput, UnifiedOutput } from "./unified-output.js";
 
 type ApiRequest = {
   source?: SourceOption;
   words?: string[] | string;
+  log?: string;
   range?: string;
   startDate?: string;
   endDate?: string;
@@ -20,37 +24,58 @@ type ApiRequest = {
   keepOpen?: boolean;
   timeoutMs?: number;
   loginTimeoutMs?: number;
+  baiduMinIntervalMs?: number;
+  baiduCooldownMs?: number;
+  baiduRateLimit?: boolean;
   lang?: TerminalLanguage;
   baiduMode?: string;
   googleMode?: string;
+  wait?: boolean | string | number;
+  waitTimeoutMs?: number | string;
+};
+
+type ServerOptions = {
+  queueEnabled?: boolean;
+  collect?: (options: Options) => Promise<UnifiedOutput | UnifiedMultiSourceOutput>;
 };
 
 export async function startServer(args: string[]): Promise<void> {
   const host = readFlag(args, "--host") || process.env.OHMYTRENDS_HOST || "127.0.0.1";
   const port = readPort(readFlag(args, "--port") || process.env.OHMYTRENDS_PORT || "3000");
+  const queueDb = readFlag(args, "--queue-db") || process.env.OHMYTRENDS_QUEUE_DB || DEFAULT_QUEUE_DB;
+  const queueEnabled = readServerBoolean(args, "--queue", "OHMYTRENDS_QUEUE", true);
   const baseArgs = withoutServerFlags(args);
   const lang = readLanguage(args);
 
-  const app = createServer(baseArgs);
+  const app = createServerWithQueue(baseArgs, new TrendJobQueue(queueDb), { queueEnabled });
   app.listen({ hostname: host, port });
   runtimeInfo(lang === "zh"
     ? [
       `ohmytrends API 已启动：http://${host}:${port}`,
       `示例页面：http://${host}:${port}`,
       "",
-      "查询关键词趋势数据示例：",
+      "提交关键词趋势查询示例：",
       `curl "http://${host}:${port}/api/trends?source=all&words=gpt,claude&range=30d"`,
+      "然后轮询返回的 pollUrl，直到 status 为 succeeded 或 failed。",
     ].join("\n")
     : [
       `ohmytrends API started: http://${host}:${port}`,
       `Example page: http://${host}:${port}`,
       "",
-      "Example keyword trend request:",
+      "Example keyword trend query submission:",
       `curl "http://${host}:${port}/api/trends?source=all&words=gpt,claude&range=30d"`,
+      "Then poll the returned pollUrl until status is succeeded or failed.",
     ].join("\n"));
 }
 
 export function createServer(baseArgs: string[] = []) {
+  const queue = new TrendJobQueue(":memory:");
+  return createServerWithQueue(baseArgs, queue);
+}
+
+export function createServerWithQueue(baseArgs: string[] = [], queue: TrendJobQueue, options: ServerOptions = {}) {
+  const queueEnabled = options.queueEnabled ?? true;
+  const collect = options.collect || collectUnified;
   return new Elysia()
     .get("/", () => new Response(renderExamplePage(), {
       headers: {
@@ -65,24 +90,160 @@ export function createServer(baseArgs: string[] = []) {
       ok: true,
       service: "ohmytrends",
     }))
-    .get("/api/trends", async ({ query, set }) => {
+    .get("/api/trends/jobs", ({ query }) => {
+      const limit = readJobLimit((query as Record<string, unknown>).limit);
+      return {
+        schemaVersion: 1,
+        jobs: queue.list(limit).map(jobResponse),
+      };
+    })
+    .post("/api/trends/jobs", ({ body, set }) => {
       try {
-        const options = optionsFromRequest(baseArgs, query as Record<string, unknown>);
-        return await collectUnified(options);
+        const options = optionsFromRequest(baseArgs, body as ApiRequest | undefined);
+        const job = queue.enqueue(options);
+        set.status = 202;
+        return jobResponse(job);
       } catch (error) {
         set.status = 400;
         return errorResponse(error);
       }
     })
-    .post("/api/trends", async ({ body, set }) => {
-      try {
-        const options = optionsFromRequest(baseArgs, body as ApiRequest | undefined);
-        return await collectUnified(options);
-      } catch (error) {
-        set.status = 400;
-        return errorResponse(error);
+    .get("/api/trends/jobs/:id", ({ params, set }) => {
+      const job = queue.get(params.id);
+      if (!job) {
+        set.status = 404;
+        return errorResponse(new Error(`Job not found: ${params.id}`));
       }
+      return jobResponse(job);
+    })
+    .get("/api/trends/sync", async ({ query, set }) => {
+      return await submitTrendQuery(
+        baseArgs,
+        { ...(query as Record<string, unknown>), wait: true },
+        set,
+        queue,
+        queueEnabled,
+        collect,
+      );
+    })
+    .post("/api/trends/sync", async ({ body, set }) => {
+      return await submitTrendQuery(
+        baseArgs,
+        { ...((body as ApiRequest | undefined) || {}), wait: true },
+        set,
+        queue,
+        queueEnabled,
+        collect,
+      );
+    })
+    .get("/api/trends/:id", ({ params, set }) => {
+      const job = queue.get(params.id);
+      if (!job) {
+        set.status = 404;
+        return errorResponse(new Error(`Query not found: ${params.id}`));
+      }
+      if (job.status === "failed") set.status = 500;
+      return jobResponse(job);
+    })
+    .get("/api/trends", async ({ query, set }) => {
+      return await submitTrendQuery(baseArgs, query as Record<string, unknown>, set, queue, queueEnabled, collect);
+    })
+    .post("/api/trends", async ({ body, set }) => {
+      return await submitTrendQuery(baseArgs, body as ApiRequest | undefined, set, queue, queueEnabled, collect);
     });
+}
+
+function jobResponse(job: ReturnType<TrendJobQueue["get"]> extends infer T ? NonNullable<T> : never) {
+  return {
+    schemaVersion: 1,
+    id: job.id,
+    queryId: job.id,
+    status: job.status,
+    pollUrl: `/api/trends/${job.id}`,
+    source: job.options.source,
+    words: job.options.words,
+    range: job.options.rangeLabel || job.options.range,
+    result: job.result,
+    error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+  };
+}
+
+async function submitTrendQuery(
+  baseArgs: string[],
+  input: ApiRequest | Record<string, unknown> | undefined,
+  set: { status?: number | string },
+  queue: TrendJobQueue,
+  queueEnabled: boolean,
+  collect: (options: Options) => Promise<UnifiedOutput | UnifiedMultiSourceOutput>,
+) {
+  let options: ReturnType<typeof optionsFromRequest>;
+  let wait: boolean;
+  let waitTimeoutMs: number;
+  try {
+    wait = readWaitFlag(input);
+    waitTimeoutMs = readWaitTimeoutMs(input);
+    options = optionsFromRequest(baseArgs, input);
+  } catch (error) {
+    set.status = 400;
+    return errorResponse(error);
+  }
+  if (!queueEnabled) return await collectSyncOutput(options, set, collect);
+  const job = queue.enqueue(options);
+  if (!wait) {
+    set.status = 202;
+    return jobResponse(job);
+  }
+  const completed = await queue.waitForCompletion(job.id, { pollIntervalMs: 100, timeoutMs: waitTimeoutMs });
+  if (!completed) {
+    set.status = 404;
+    return errorResponse(new Error(`Query not found: ${job.id}`));
+  }
+  if (completed.status === "queued" || completed.status === "running") set.status = 202;
+  if (completed.status === "failed") set.status = 500;
+  return jobResponse(completed);
+}
+
+async function collectSyncOutput(
+  options: ReturnType<typeof optionsFromRequest>,
+  set: { status?: number | string },
+  collect: (options: Options) => Promise<UnifiedOutput | UnifiedMultiSourceOutput>,
+) {
+  try {
+    return await collect(options);
+  } catch (error) {
+    set.status = 500;
+    return errorResponse(error);
+  }
+}
+
+function readJobLimit(value: unknown): number {
+  const number = typeof value === "string" ? Number(value) : undefined;
+  return Number.isInteger(number) && number! > 0 && number! <= 500 ? number! : 50;
+}
+
+function readWaitFlag(input: ApiRequest | Record<string, unknown> | undefined): boolean {
+  const value = input?.wait;
+  if (value === undefined || value === null || value === "") return false;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+  }
+  throw new Error(`Invalid wait: ${String(value)}. Expected true or false`);
+}
+
+function readWaitTimeoutMs(input: ApiRequest | Record<string, unknown> | undefined): number {
+  const value = input?.waitTimeoutMs;
+  if (value === undefined || value === null || value === "") return 0;
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (Number.isFinite(number) && number >= 0) return number;
+  throw new Error(`Invalid waitTimeoutMs: ${String(value)}. Expected a non-negative number`);
 }
 
 function optionsFromRequest(baseArgs: string[], input: ApiRequest | Record<string, unknown> = {}) {
@@ -109,6 +270,10 @@ function argsFromRequest(input: ApiRequest | Record<string, unknown>): string[] 
   pushBoolean(args, "--keep-open", input.keepOpen);
   pushNumber(args, "--timeout-ms", input.timeoutMs);
   pushNumber(args, "--login-timeout-ms", input.loginTimeoutMs);
+  pushNumber(args, "--baidu-min-interval-ms", input.baiduMinIntervalMs);
+  pushNumber(args, "--baidu-cooldown-ms", input.baiduCooldownMs);
+  pushBoolean(args, "--baidu-rate-limit", input.baiduRateLimit);
+  pushString(args, "--log", input.log);
   pushString(args, "--lang", input.lang);
   pushString(args, "--baidu-mode", input.baiduMode);
   pushString(args, "--google-mode", input.googleMode);
@@ -158,7 +323,7 @@ function readPort(value: string): number {
 }
 
 function withoutServerFlags(args: string[]): string[] {
-  const serverFlags = new Set(["--host", "--port"]);
+  const serverFlags = new Set(["--host", "--port", "--queue-db", "--queue"]);
   const result: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -170,6 +335,15 @@ function withoutServerFlags(args: string[]): string[] {
     result.push(arg);
   }
   return result;
+}
+
+function readServerBoolean(args: string[], flag: string, envName: string, fallback: boolean): boolean {
+  const value = readFlag(args, flag) ?? process.env[envName];
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  throw new Error(`Invalid ${flag}: ${value}. Expected true or false`);
 }
 
 function errorResponse(error: unknown) {
@@ -287,6 +461,14 @@ function renderExamplePage(): string {
 
           <div class="mb-6 grid gap-3 sm:grid-cols-2">
             <div class="border border-line bg-[#f8f7f3]/80 p-4">
+              <p class="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted" data-i18n="queryIdLabel">query id</p>
+              <strong id="meta-query-id" class="block break-all font-mono text-sm leading-6">-</strong>
+            </div>
+            <div class="border border-line bg-[#f8f7f3]/80 p-4">
+              <p class="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted" data-i18n="pollUrlLabel">poll url</p>
+              <strong id="meta-poll-url" class="block break-all font-mono text-sm leading-6">-</strong>
+            </div>
+            <div class="border border-line bg-[#f8f7f3]/80 p-4">
               <p class="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted" data-i18n="sourceLabel">source</p>
               <strong id="meta-source" class="block break-words font-mono text-sm leading-6">-</strong>
             </div>
@@ -338,6 +520,8 @@ function renderExamplePage(): string {
     const metaStatus = document.querySelector("#meta-status");
     const metaKeywords = document.querySelector("#meta-keywords");
     const metaCaptured = document.querySelector("#meta-captured");
+    const metaQueryId = document.querySelector("#meta-query-id");
+    const metaPollUrl = document.querySelector("#meta-poll-url");
     let activeCodeTab = "curl";
     let loadingTimer = undefined;
     let language = navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -359,8 +543,12 @@ function renderExamplePage(): string {
         responseTitle: "response",
         readyStatus: "Ready",
         requestingStatus: "Requesting",
+        submittedStatus: "Submitted",
+        pollingStatus: "Polling",
         completeStatus: "Complete",
         failedStatus: "Failed",
+        queryIdLabel: "query id",
+        pollUrlLabel: "poll url",
         statusLabel: "status",
         capturedLabel: "captured",
         outputPlaceholder: "Submit the form to query /api/trends.",
@@ -388,8 +576,12 @@ function renderExamplePage(): string {
         responseTitle: "响应",
         readyStatus: "就绪",
         requestingStatus: "请求中",
+        submittedStatus: "已提交",
+        pollingStatus: "轮询中",
         completeStatus: "完成",
         failedStatus: "失败",
+        queryIdLabel: "查询 ID",
+        pollUrlLabel: "轮询 URL",
         statusLabel: "状态",
         capturedLabel: "采集时间",
         outputPlaceholder: "提交表单后会请求 /api/trends。",
@@ -443,15 +635,37 @@ function renderExamplePage(): string {
     }
 
     function setMeta(data) {
-      metaSource.textContent = data.source || "-";
-      metaStatus.textContent = data.status || "-";
-      const keywords = Array.isArray(data.query?.keywords)
-        ? data.query.keywords
-        : Array.isArray(data.query?.words)
-          ? data.query.words
+      const payload = data.result || data;
+      metaQueryId.textContent = data.id || "-";
+      metaPollUrl.textContent = data.pollUrl || (data.id ? "/api/trends/" + data.id : "-");
+      metaSource.textContent = payload.source || data.source || "-";
+      metaStatus.textContent = data.status || payload.status || "-";
+      const keywords = Array.isArray(payload.query?.keywords)
+        ? payload.query.keywords
+        : Array.isArray(payload.query?.words)
+          ? payload.query.words
+          : Array.isArray(data.words)
+            ? data.words
+            : [];
+      metaKeywords.textContent = keywords.length > 0 ? keywords.join(", ") : "-";
+      metaCaptured.textContent = payload.capturedAt || data.finishedAt || data.updatedAt || "-";
+    }
+
+    function setResultMeta(data) {
+      const payload = data.result || data;
+      metaQueryId.textContent = data.id || "-";
+      metaPollUrl.textContent = data.pollUrl || (data.id ? "/api/trends/" + data.id : "-");
+      metaSource.textContent = payload.source || data.source || "-";
+      metaStatus.textContent = payload.status || data.status || "-";
+      const keywords = Array.isArray(payload.query?.keywords)
+        ? payload.query.keywords
+        : Array.isArray(payload.query?.words)
+          ? payload.query.words
+          : Array.isArray(data.words)
+            ? data.words
           : [];
       metaKeywords.textContent = keywords.length > 0 ? keywords.join(", ") : "-";
-      metaCaptured.textContent = data.capturedAt || "-";
+      metaCaptured.textContent = payload.capturedAt || data.finishedAt || "-";
     }
 
     function setLoadingMeta(text) {
@@ -459,6 +673,8 @@ function renderExamplePage(): string {
       metaStatus.textContent = text;
       metaKeywords.textContent = text;
       metaCaptured.textContent = text;
+      metaQueryId.textContent = text;
+      metaPollUrl.textContent = text;
       output.textContent = text;
     }
 
@@ -513,25 +729,39 @@ function renderExamplePage(): string {
       const json = JSON.stringify(payload, null, 2);
       if (kind === "typescript") {
         return [
-          "const response = await fetch(\\"" + url + "\\");",
+          "const submitted = await fetch(\\"" + url + "\\");",
+          "const job = await submitted.json();",
           "",
-          "if (!response.ok) {",
-          "  throw new Error(\`ohmytrends request failed: \${response.status}\`);",
+          "if (!submitted.ok) {",
+          "  throw new Error(\`ohmytrends request failed: \${submitted.status}\`);",
           "}",
           "",
-          "const data = await response.json();",
-          "console.log(data);"
+          "let polled = job;",
+          "while ([\\"queued\\", \\"running\\"].includes(polled.status)) {",
+          "  await new Promise((resolve) => setTimeout(resolve, 2000));",
+          "  const response = await fetch(polled.pollUrl);",
+          "  polled = await response.json();",
+          "}",
+          "",
+          "console.log(polled.result ?? polled);"
         ].join("\\n");
       }
       if (kind === "python") {
         return [
           "import requests",
+          "import time",
           "",
-          "response = requests.get(\\"" + url + "\\", timeout=120)",
+          "response = requests.get(\\"" + url + "\\", timeout=30)",
           "response.raise_for_status()",
+          "job = response.json()",
           "",
-          "data = response.json()",
-          "print(data)"
+          "while job[\\"status\\"] in (\\"queued\\", \\"running\\"):",
+          "    time.sleep(2)",
+          "    response = requests.get(\\"" + window.location.origin + "\\" + job[\\"pollUrl\\"], timeout=30)",
+          "    response.raise_for_status()",
+          "    job = response.json()",
+          "",
+          "print(job.get(\\"result\\", job))"
         ].join("\\n");
       }
       if (kind === "go") {
@@ -546,7 +776,7 @@ function renderExamplePage(): string {
           ")",
           "",
           "func main() {",
-          "  client := &http.Client{Timeout: 120 * time.Second}",
+          "  client := &http.Client{Timeout: 30 * time.Second}",
           "  resp, err := client.Get(\\"" + url + "\\")",
           "  if err != nil {",
           "    panic(err)",
@@ -561,12 +791,19 @@ function renderExamplePage(): string {
           "  if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {",
           "    panic(err)",
           "  }",
+          "  // Poll GET /api/trends/{id} until status is succeeded or failed.",
           "  fmt.Printf(\\"%#v\\\\n\\", data)",
           "}"
         ].join("\\n");
       }
       return [
         "curl \\"" + url + "\\"",
+        "",
+        "# Then poll the returned URL:",
+        "curl \\"" + window.location.origin + "/api/trends/<query-id>\\"",
+        "",
+        "# Wait for completion on the same endpoint:",
+        "curl \\"" + url + "&wait=true\\"",
         "",
         "# POST works too:",
         "curl -X POST \\"" + window.location.origin + "/api/trends\\" \\\\",
@@ -659,6 +896,19 @@ function renderExamplePage(): string {
       });
     }
 
+    async function pollQuery(job) {
+      let current = job;
+      while (current && (current.status === "queued" || current.status === "running")) {
+        setStatus("warn", copy.pollingStatus + " " + current.status);
+        setMeta(current);
+        output.textContent = JSON.stringify(current, null, 2);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const response = await fetch(current.pollUrl);
+        current = await response.json();
+      }
+      return current;
+    }
+
     applyI18n();
     setStatus("ready", copy.readyStatus);
 
@@ -679,11 +929,21 @@ function renderExamplePage(): string {
       startLoadingAnimation();
       try {
         const response = await fetch(url);
-        const data = await response.json();
+        let data = await response.json();
+        if (response.ok && data.pollUrl) {
+          stopLoadingAnimation();
+          setStatus("warn", copy.submittedStatus);
+          setMeta(data);
+          output.textContent = JSON.stringify(data, null, 2);
+          data = await pollQuery(data);
+        }
         stopLoadingAnimation();
-        setMeta(data);
+        setResultMeta(data);
         output.textContent = JSON.stringify(data, null, 2);
-        setStatus(response.ok ? "ok" : "error", response.ok ? copy.completeStatus : copy.failedStatus);
+        setStatus(
+          response.ok && data.status !== "failed" ? "ok" : "error",
+          response.ok && data.status !== "failed" ? copy.completeStatus : copy.failedStatus,
+        );
       } catch (error) {
         stopLoadingAnimation();
         const message = error instanceof Error ? error.message : String(error);

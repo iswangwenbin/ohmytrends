@@ -13,7 +13,9 @@ import {
   setContextStatus,
   setPageStatus,
 } from "./browser-utils.js";
+import { preparePersistentProfile } from "./browser-profile-lock.js";
 import { DEFAULT_GOOGLE_TRENDS_URL } from "./config.js";
+import { collectOutputDiagnostics, writeDiagnostics } from "./diagnostics.js";
 import { runtimeInfo } from "./logger.js";
 import { defaultOverviewRow } from "./overview.js";
 import { clearSessionMarker, hasVerifiedSessionMarker, markSessionVerified } from "./session-marker.js";
@@ -65,6 +67,7 @@ type GooglePageCapture = {
 
 const GOOGLE_PAGE_CAPTURE_WAIT_MS = 1_500;
 const GOOGLE_RELATED_FALLBACK_TIMEOUT_MS = 8_000;
+const GOOGLE_PAGE_MODE_TIMEOUT_MS = 15_000;
 
 type GoogleRankedList = {
   rankedKeyword?: GoogleRankedKeyword[];
@@ -81,6 +84,7 @@ type GoogleRankedKeyword = {
 };
 
 export async function verifyGoogleLogin(options: Pick<Options, "profileDir" | "timeoutMs" | "words" | "range" | "geo">): Promise<boolean> {
+  await preparePersistentProfile(googleProfileDirFor(options as Options));
   const browser = await launchPersistentContext({
     userDataDir: googleProfileDirFor(options as Options),
     headless: true,
@@ -114,6 +118,7 @@ export async function loginGoogle(options: Options): Promise<void> {
 
 async function loginGoogleAttempt(options: Options, retryCount: number): Promise<void> {
   emitStatus(options, "正在准备 Google 登录...");
+  await preparePersistentProfile(googleProfileDirFor(options));
   const browser = await launchPersistentContext({
     userDataDir: googleProfileDirFor(options),
     headless: false,
@@ -182,8 +187,21 @@ async function loginGoogleAttempt(options: Options, retryCount: number): Promise
 }
 
 export async function collectGoogleTrends(options: Options): Promise<CollectOutput> {
+  writeDiagnostics(options, {
+    event: "collection_start",
+    source: "google",
+    mode: options.googleMode,
+    details: { sourceUrl: googleExplorePageUrl(options), geo: options.geo },
+  });
   const googleProfileDir = googleProfileDirFor(options);
   if (options.headless && !hasGoogleLoginInProfile(googleProfileDir)) {
+    writeDiagnostics(options, {
+      event: "login_required",
+      source: "google",
+      mode: options.googleMode,
+      fallback: "visible-login",
+      reason: "verified session marker missing in headless mode",
+    });
     runtimeInfo("未检测到 Google 登录状态，正在打开可视浏览器用于手动登录...");
     return collectGoogleTrends({ ...options, headless: false });
   }
@@ -193,6 +211,7 @@ export async function collectGoogleTrends(options: Options): Promise<CollectOutp
   const tick = (label: string) => { if (trace) runtimeInfo(`[google-timing ${(Date.now() - t0).toString().padStart(5)}ms] ${label}`); };
 
   tick("launch start");
+  await preparePersistentProfile(googleProfileDir);
   const browser = await launchPersistentContext({
     userDataDir: googleProfileDir,
     headless: options.headless,
@@ -226,6 +245,13 @@ export async function collectGoogleTrends(options: Options): Promise<CollectOutp
     await page.waitForSelector("body", { timeout: options.timeoutMs });
     tick("body ready");
     if (options.headless && !await hasValidGoogleLogin(browser, page)) {
+      writeDiagnostics(options, {
+        event: "login_invalid",
+        source: "google",
+        mode: options.googleMode,
+        fallback: "visible-login",
+        reason: "headless login verification failed",
+      });
       await clearSessionMarker(googleProfileDir);
       runtimeInfo("Google 登录状态无效，正在打开可视浏览器用于重新登录...");
       await closeContextSafely(browser);
@@ -235,11 +261,27 @@ export async function collectGoogleTrends(options: Options): Promise<CollectOutp
     await ensureGoogleLoggedIn(browser, page, options, sourceUrl);
     await setPageStatus(page, !options.headless, "正在采集 Google 趋势数据...");
     if (options.googleMode === "page") {
-      const result = await collectGoogleTrendsWithApiFallback(page, options, sourceUrl);
+      const result = await collectGoogleTrendsViaPageMode(page, options, sourceUrl);
+      writeDiagnostics(options, {
+        event: "collection_complete",
+        source: "google",
+        mode: options.googleMode,
+        dataSource: "page",
+        status: result.status,
+        details: collectOutputDiagnostics(result),
+      });
       tick(`collect done (page) status=${result.status}`);
       return result;
     }
     const result = await collectGoogleTrendsViaApiMode(page, options, sourceUrl);
+    writeDiagnostics(options, {
+      event: "collection_complete",
+      source: "google",
+      mode: options.googleMode,
+      dataSource: "api",
+      status: result.status,
+      details: collectOutputDiagnostics(result),
+    });
     tick(`collect done (api) status=${result.status}`);
     return result;
   } finally {
@@ -415,46 +457,6 @@ async function isGoogleLoginPrompt(page: PageLike): Promise<boolean> {
   }
 }
 
-async function collectGoogleTrendsWithApiFallback(
-  page: PageLike,
-  options: Options,
-  sourceUrl: string,
-): Promise<CollectOutput> {
-  let pageResult: CollectOutput | undefined;
-  let pageError: unknown;
-  try {
-    pageResult = await collectGoogleTrendsViaPageMode(page, options, sourceUrl);
-    if (pageResult.status === "ok") return pageResult;
-    runtimeInfo(`Google page 模式数据不完整（${pageResult.reason || "no_data"}），尝试 API 模式兜底...`);
-  } catch (error) {
-    pageError = error;
-    runtimeInfo(
-      `Google page 模式失败：${error instanceof Error ? error.message : String(error)}，尝试 API 模式兜底...`,
-    );
-  }
-
-  try {
-    const apiResult = await collectGoogleTrendsViaApiMode(page, options, sourceUrl);
-    if (apiResult.status === "ok") return apiResult;
-    // Both empty — surface the API result; it has consistent metadata even
-    // when no data is available.
-    return apiResult;
-  } catch (apiError) {
-    if (pageResult) {
-      runtimeInfo(
-        `Google API 兜底也失败：${apiError instanceof Error ? apiError.message : String(apiError)}；返回 page 模式的 no_data 结果。`,
-      );
-      return pageResult;
-    }
-    if (pageError) {
-      runtimeInfo(
-        `Google API 兜底也失败：${apiError instanceof Error ? apiError.message : String(apiError)}`,
-      );
-    }
-    throw apiError;
-  }
-}
-
 async function collectGoogleTrendsViaPageMode(
   page: PageLike,
   options: Options,
@@ -465,19 +467,25 @@ async function collectGoogleTrendsViaPageMode(
   }
   const captured: GooglePageCapture = { timelines: [], related: [] };
   const captureTasks = new Set<Promise<void>>();
+  const pageModeTimeoutMs = googlePageModeTimeoutMs(options.timeoutMs);
   page.on("response", (response: ResponseLike) => {
     queueGooglePageResponseCapture(response, captured, captureTasks);
   });
 
   // Arm the multiline waiter BEFORE navigation so we never miss the response.
-  // Use the full request timeout — Google occasionally takes 5-10s to fire the
-  // multiline call on a cold session.
+  // Give Google a bounded window to fire the page response; page mode should
+  // surface capture failures directly instead of spending the whole CLI timeout.
   const multilineWaiter = page.waitForResponse(
     (resp) => googlePageResponseKindFromUrl(resp.url()) === "timeline",
-    { timeout: options.timeoutMs },
+    { timeout: pageModeTimeoutMs },
   ).catch(() => undefined);
 
-  await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: options.timeoutMs });
+  try {
+    await page.goto(sourceUrl, { waitUntil: "commit", timeout: pageModeTimeoutMs });
+  } catch (error) {
+    await stopPageLoading(page);
+    throw error;
+  }
 
   // Wait for the timeline response specifically. Avoids the multi-second
   // `networkidle` wait — Google Trends fires periodic analytics calls that
@@ -499,6 +507,20 @@ async function collectGoogleTrendsViaPageMode(
   }
 
   const timelineCapture = selectGoogleTimelineCapture(captured.timelines, options.words);
+  writeDiagnostics(options, {
+    event: "page_capture",
+    source: "google",
+    mode: options.googleMode,
+    dataSource: "page",
+    status: timelineCapture ? "ok" : "no_data",
+    details: {
+      directTimelineMatched: Boolean(directMultiline),
+      timelineResponses: captured.timelines.length,
+      relatedResponses: captured.related.length,
+      selectedTimelineUrl: timelineCapture ? redactGoogleApiUrl(timelineCapture.url) : undefined,
+      selectedTimelinePoints: timelineCapture?.response.default?.timelineData?.length || 0,
+    },
+  });
   if (!timelineCapture || !googleTimelineHasDataForWords(timelineCapture.response, options.words)) {
     return googleNoDataOutput(
       options,
@@ -647,10 +669,36 @@ async function collectGoogleTrendsViaApiMode(
   if (!googleTimelineHasDataForWords(timeline, options.words)) {
     // Google occasionally returns HTTP 200 with all `hasData=false` for a fresh
     // headless context. A short delay + one retry usually unblocks it.
+    writeDiagnostics(options, {
+      event: "response_retry",
+      source: "google",
+      mode: options.googleMode,
+      dataSource: "api",
+      retry: true,
+      reason: "timeline response had no data",
+      details: { url: redactGoogleApiUrl(timelineUrl.toString()) },
+    });
     await page.waitForTimeout(2_500);
     const retried = await fetchGoogleJsonInPage<GoogleTimelineResponse>(page, timelineUrl.toString()).catch(() => undefined);
     if (retried && googleTimelineHasDataForWords(retried, options.words)) {
       timeline = retried;
+      writeDiagnostics(options, {
+        event: "retry_success",
+        source: "google",
+        mode: options.googleMode,
+        dataSource: "api",
+        retry: true,
+        reason: "timeline retry returned data",
+      });
+    } else {
+      writeDiagnostics(options, {
+        event: "retry_no_data",
+        source: "google",
+        mode: options.googleMode,
+        dataSource: "api",
+        retry: true,
+        reason: "timeline retry still had no data",
+      });
     }
   }
   const points = timeline.default?.timelineData || [];
@@ -680,6 +728,22 @@ async function collectGoogleTrendsViaApiMode(
     raw: options.raw ? timeline as unknown as SearchIndexResponse : undefined,
     error: ok ? undefined : "Google Trends returned no timeline data",
   };
+}
+
+export function googlePageModeTimeoutMs(timeoutMs: number): number {
+  return Math.min(timeoutMs, GOOGLE_PAGE_MODE_TIMEOUT_MS);
+}
+
+async function stopPageLoading(page: PageLike): Promise<void> {
+  try {
+    await page.evaluate<undefined, boolean>((unused) => {
+      void unused;
+      window.stop();
+      return true;
+    }, undefined);
+  } catch {
+    // The page can be between execution contexts after a navigation timeout.
+  }
 }
 
 async function collectRelatedQueries(

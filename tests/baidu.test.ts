@@ -4,8 +4,10 @@ import {
   decodeBaiduTrends,
   isBaiduLoggedInText,
   isBaiduLoginPromptText,
+  selectBaiduIndexResponseForTest,
   unavailableWordsFromText,
 } from "../src/baidu.js";
+import type { Options, SearchIndexResponse } from "../src/types.js";
 
 describe("Baidu index decoding", () => {
   test("decodes feed index payloads from data.index", () => {
@@ -33,6 +35,33 @@ describe("Baidu index decoding", () => {
         ],
       },
     ]);
+  });
+
+  test("uses captured feed response even when Baidu shifts feed dates by one day", async () => {
+    const captured: SearchIndexResponse = {
+      status: 0,
+      data: {
+        index: [
+          {
+            key: [{ name: "gpt" }],
+            startDate: "2026-04-26",
+            endDate: "2026-05-25",
+            data: "10,20,30",
+          },
+        ],
+        uniqid: "captured",
+      },
+      message: "success",
+    };
+
+    const selected = await selectBaiduIndexResponseForTest({
+      ...baseBaiduOptions(),
+      words: ["gpt"],
+      startDate: "2026-04-27",
+      endDate: "2026-05-26",
+    }, "feed", [captured]);
+
+    expect(selected).toBe(captured);
   });
 
   test("extracts unindexed keywords from Baidu permission text", () => {
@@ -116,3 +145,28 @@ describe("Baidu index decoding", () => {
     expect(isBaiduLoggedInText(loggedInHome)).toBe(true);
   });
 });
+
+function baseBaiduOptions(): Options {
+  return {
+    source: "baidu",
+    lang: "zh",
+    url: "https://index.baidu.com/v2/main/index.html#/trend/gpt?words=gpt",
+    words: ["gpt"],
+    profileDir: "profiles/baidu",
+    out: "exports/baidu-index.json",
+    format: "json",
+    raw: false,
+    headless: true,
+    keepOpen: false,
+    diagnosticsLogPath: undefined,
+    timeoutMs: 60_000,
+    loginTimeoutMs: 300_000,
+    baiduRateLimit: true,
+    baiduMinIntervalMs: 15_000,
+    baiduCooldownMs: 120_000,
+    baiduMode: "page",
+    googleMode: "page",
+    geo: "",
+    area: "0",
+  };
+}

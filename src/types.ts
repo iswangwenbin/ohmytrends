@@ -116,8 +116,13 @@ export type Options = {
   raw: boolean;
   headless: boolean;
   keepOpen: boolean;
+  diagnosticsLogPath?: string;
+  diagnosticsLogDefault?: boolean;
   timeoutMs: number;
   loginTimeoutMs: number;
+  baiduRateLimit: boolean;
+  baiduMinIntervalMs: number;
+  baiduCooldownMs: number;
   startDate?: string;
   endDate?: string;
   days?: number;
@@ -188,6 +193,8 @@ export type ResponseLike = {
   url(): string;
   json(): Promise<unknown>;
   text?(): Promise<string>;
+  status?(): number;
+  request?(): RequestLike;
 };
 
 export type RouteLike = {
@@ -200,4 +207,6 @@ export type RouteLike = {
 export type RequestLike = {
   url(): string;
   resourceType(): string;
+  method?(): string;
+  postData?(): string | null;
 };

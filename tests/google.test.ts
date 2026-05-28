@@ -3,6 +3,7 @@ import {
   findGoogleWidget,
   googleExplorePageUrl,
   googleOverviewFromTrends,
+  googlePageModeTimeoutMs,
   googleRelatedQueriesFromResponse,
   googleTimelineToTrends,
   redactGoogleApiUrl,
@@ -55,6 +56,11 @@ describe("Google Trends helpers", () => {
     expect(url.searchParams.get("q")).toBe("codex app,claude,gemini");
     expect(url.searchParams.get("geo")).toBe("US");
     expect(url.searchParams.get("date")).toBe("today 12-m");
+  });
+
+  test("caps Google page mode timeout", () => {
+    expect(googlePageModeTimeoutMs(60_000)).toBe(15_000);
+    expect(googlePageModeTimeoutMs(5_000)).toBe(5_000);
   });
 
   test("redacts Google API tokens", () => {

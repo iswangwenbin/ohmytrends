@@ -16,7 +16,9 @@ import {
   setPageStatus,
   waitForPageSettled,
 } from "./browser-utils.js";
+import { preparePersistentProfile } from "./browser-profile-lock.js";
 import { buildBaiduTrendUrl, DEFAULT_HOME_URL } from "./config.js";
+import { collectOutputDiagnostics, writeDiagnostics } from "./diagnostics.js";
 import { runtimeInfo, runtimeWarn } from "./logger.js";
 import { defaultOverviewRow, hasOverviewData, overviewRowFromCells, zeroOverviewRow } from "./overview.js";
 import { clearSessionMarker, hasVerifiedSessionMarker, markSessionVerified } from "./session-marker.js";
@@ -39,6 +41,7 @@ import type {
 } from "./types.js";
 
 export async function verifyBaiduLogin(options: Pick<Options, "profileDir" | "timeoutMs">): Promise<boolean> {
+  await preparePersistentProfile(options.profileDir);
   const browser = await launchPersistentContext({
     userDataDir: options.profileDir,
     headless: true,
@@ -68,6 +71,7 @@ export async function verifyBaiduLogin(options: Pick<Options, "profileDir" | "ti
 
 export async function loginBaidu(options: Options): Promise<void> {
   emitStatus(options, "正在准备百度登录...");
+  await preparePersistentProfile(options.profileDir);
   const browser = await launchPersistentContext({
     userDataDir: options.profileDir,
     headless: false,
@@ -120,11 +124,25 @@ export async function loginBaidu(options: Options): Promise<void> {
 }
 
 export async function collectBaiduIndex(options: Options): Promise<CollectOutput> {
+  writeDiagnostics(options, {
+    event: "collection_start",
+    source: "baidu",
+    mode: options.baiduMode,
+    details: { url: options.url, area: options.area },
+  });
   if (options.headless && !hasBaiduLoginInProfile(options.profileDir)) {
+    writeDiagnostics(options, {
+      event: "login_required",
+      source: "baidu",
+      mode: options.baiduMode,
+      fallback: "visible-login",
+      reason: "verified session marker missing in headless mode",
+    });
     runtimeInfo("未检测到百度登录状态，正在打开可视浏览器用于手动登录...");
     return collectBaiduIndex({ ...options, headless: false });
   }
 
+  await preparePersistentProfile(options.profileDir);
   const browser = await launchPersistentContext({
     userDataDir: options.profileDir,
     headless: options.headless,
@@ -146,7 +164,7 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
     const page = await browser.newPage();
     await setPageStatus(page, !options.headless, "正在打开百度指数...");
     page.on("response", (response) => {
-      queueBaiduResponseCapture(response, intercepted, responseCaptureTasks);
+      queueBaiduResponseCapture(response, intercepted, responseCaptureTasks, options);
     });
 
     await page.goto(DEFAULT_HOME_URL, {
@@ -156,25 +174,44 @@ export async function collectBaiduIndex(options: Options): Promise<CollectOutput
     await page.waitForSelector("body", { timeout: options.timeoutMs });
     await waitForBaiduHomeHydrated(page, options.timeoutMs);
     if (options.headless && !await hasValidBaiduLogin(browser, page)) {
+      writeDiagnostics(options, {
+        event: "login_invalid",
+        source: "baidu",
+        mode: options.baiduMode,
+        fallback: "visible-login",
+        reason: "headless login verification failed",
+      });
       runtimeInfo("百度登录状态无效，正在打开可视浏览器用于重新登录...");
       await closeContextSafely(browser);
       return collectBaiduIndex({ ...options, headless: false });
     }
     await ensureLoggedIn(browser, page, options);
 
-    const apiFirstOutput = options.baiduMode === "api"
-      ? await tryCollectBaiduIndexFromApi(page, browser, options, intercepted)
-      : undefined;
-    if (apiFirstOutput) return apiFirstOutput;
+    if (options.baiduMode === "api") {
+      return await collectBaiduIndexFromApi(page, browser, options, intercepted);
+    }
 
     try {
-      return await collectBaiduIndexViaPageMode(page, browser, options, intercepted, responseCaptureTasks);
+      const output = await collectBaiduIndexViaPageMode(page, browser, options, intercepted, responseCaptureTasks);
+      writeDiagnostics(options, {
+        event: "collection_complete",
+        source: "baidu",
+        mode: options.baiduMode,
+        dataSource: "page",
+        status: output.status,
+        details: collectOutputDiagnostics(output),
+      });
+      return output;
     } catch (error) {
-      if (options.baiduMode === "api") throw error;
-      runtimeInfo(`百度 page 模式采集失败，回退到 api 模式：${error instanceof Error ? error.message : String(error)}`);
-      await setPageStatus(page, !options.headless, "百度 page 模式采集失败，正在回退到接口采集...");
-      const apiFallbackOutput = await tryCollectBaiduIndexFromApi(page, browser, options, intercepted);
-      if (apiFallbackOutput) return apiFallbackOutput;
+      writeDiagnostics(options, {
+        event: "collection_error",
+        source: "baidu",
+        mode: options.baiduMode,
+        reason: "page mode failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      runtimeInfo(`百度 page 模式采集失败：${error instanceof Error ? error.message : String(error)}`);
+      await setPageStatus(page, !options.headless, "百度 page 模式采集失败。");
       throw error;
     }
   } finally {
@@ -220,6 +257,7 @@ async function collectBaiduIndexViaPageMode(
     await setPageStatus(page, !options.headless, "正在等待百度指数趋势页...");
     await initialApiResponses;
     await flushBaiduResponseCaptures(responseCaptureTasks);
+    await waitForBaiduInitialData(page, options, intercepted, responseCaptureTasks);
     // If the API responses already cover every requested keyword, the page may
     // briefly show a "未被收录" hint banner during initial render that gets
     // wiped once the chart hydrates. Trust the API and skip the DOM check in
@@ -291,22 +329,28 @@ async function collectBaiduIndexViaPageMode(
     }
     const searchOverview = overviewResult.search.rows;
     const feedOverview = overviewResult.feed.rows;
-    const noDataReason = overviewResult.search.found ? undefined : "Search overview data structure not found";
+    const overviewWarning = overviewResult.search.found ? undefined : "Search overview data structure not found";
+    if (overviewWarning) {
+      writeDiagnostics(options, {
+        event: "overview_missing",
+        source: "baidu",
+        mode: options.baiduMode,
+        reason: overviewWarning,
+      });
+    }
     await setPageStatus(page, !options.headless, "正在采集百度搜索指数和资讯指数数据...");
     const [searchResult, feedResult] = await Promise.all([
-      noDataReason
-        ? Promise.resolve(emptyBaiduSection("search", effectiveOptions, searchOverview, noDataReason))
-        : collectTrendData(page, effectiveOptions, "search", intercepted.search || [], searchOverview, {
-          allowDirectApi: false,
-          allowFallbackApi: true,
-        }),
+      collectTrendData(page, effectiveOptions, "search", intercepted.search || [], searchOverview, {
+        allowDirectApi: false,
+        allowFallbackApi: false,
+      }),
       collectTrendData(
         page,
         effectiveOptions,
         "feed",
         intercepted.feed || [],
         feedOverview,
-        { allowDirectApi: false, allowFallbackApi: true },
+        { allowDirectApi: false, allowFallbackApi: false },
       ),
     ]);
     await setPageStatus(
@@ -335,19 +379,25 @@ async function collectBaiduIndexViaPageMode(
       await setContextStatus(browser, !options.headless, message);
     }
 
-    return buildBaiduCollectOutput(options, page.url(), searchResult, feedResult, missingWords, noDataReason);
+    return buildBaiduCollectOutput(options, page.url(), searchResult, feedResult, missingWords, overviewWarning);
 }
 
 export function hasBaiduLoginInProfile(profileDir: string): boolean {
   return hasVerifiedSessionMarker(profileDir, "baidu");
 }
 
-async function tryCollectBaiduIndexFromApi(
+async function collectBaiduIndexFromApi(
   page: PageLike,
   browser: BrowserContextLike,
   options: Options,
   intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
-): Promise<CollectOutput | undefined> {
+): Promise<CollectOutput> {
+  writeDiagnostics(options, {
+    event: "api_attempt",
+    source: "baidu",
+    mode: options.baiduMode,
+    dataSource: "api",
+  });
   await setPageStatus(page, !options.headless, "正在通过百度接口直接获取指数数据...");
   try {
     intercepted.search = [];
@@ -370,19 +420,41 @@ async function tryCollectBaiduIndexFromApi(
       }),
     ]);
 
-    const hasData = hasTrendPoints(searchResult) || hasTrendPoints(feedResult);
-    if (!hasData) {
-      runtimeInfo("百度接口直连暂未获取到有效趋势数据，回退到页面采集。");
-      await setPageStatus(page, !options.headless, "百度接口直连未获取到数据，正在回退到页面采集...");
-      return undefined;
-    }
-
     const missingWords = uniqueWords([
       ...missingWordsFromSection(options.words, searchResult),
       ...missingWordsFromSection(options.words, feedResult),
     ]);
     applyUnavailableWordDefaults(searchResult, missingWords);
     applyUnavailableWordDefaults(feedResult, missingWords);
+
+    const hasData = hasTrendPoints(searchResult) || hasTrendPoints(feedResult);
+    if (!hasData) {
+      const output = buildBaiduCollectOutput(options, page.url(), searchResult, feedResult, missingWords);
+      writeDiagnostics(options, {
+        event: "api_no_data",
+        source: "baidu",
+        mode: options.baiduMode,
+        dataSource: "api",
+        status: output.status,
+        details: {
+          searchPoints: pointCountForSection(searchResult),
+          feedPoints: pointCountForSection(feedResult),
+          ...collectOutputDiagnostics(output),
+        },
+      });
+      writeDiagnostics(options, {
+        event: "collection_complete",
+        source: "baidu",
+        mode: options.baiduMode,
+        dataSource: "api",
+        status: output.status,
+        details: collectOutputDiagnostics(output),
+      });
+      runtimeInfo("百度接口直连暂未获取到有效趋势数据。");
+      await setPageStatus(page, !options.headless, "百度接口直连未获取到数据。");
+      return output;
+    }
+
     if (missingWords.length > 0) {
       const message = unavailableWordsMessage(missingWords);
       runtimeWarn(message);
@@ -394,12 +466,32 @@ async function tryCollectBaiduIndexFromApi(
       !options.headless,
       `百度接口采集完成：搜索指数 ${searchResult.trends.length} 组，资讯指数 ${feedResult.trends.length} 组。`,
     );
-    return buildBaiduCollectOutput(options, page.url(), searchResult, feedResult, missingWords);
+    const output = buildBaiduCollectOutput(options, page.url(), searchResult, feedResult, missingWords);
+    writeDiagnostics(options, {
+      event: "collection_complete",
+      source: "baidu",
+      mode: options.baiduMode,
+      dataSource: "api",
+      status: output.status,
+      details: collectOutputDiagnostics(output),
+    });
+    return output;
   } catch (error) {
-    runtimeInfo(`百度接口直连失败，回退到页面采集：${error instanceof Error ? error.message : String(error)}`);
-    await setPageStatus(page, !options.headless, "百度接口直连失败，正在回退到页面采集...");
-    return undefined;
+    writeDiagnostics(options, {
+      event: "api_error",
+      source: "baidu",
+      mode: options.baiduMode,
+      dataSource: "api",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    runtimeInfo(`百度接口直连失败：${error instanceof Error ? error.message : String(error)}`);
+    await setPageStatus(page, !options.headless, "百度接口直连失败。");
+    throw error;
   }
+}
+
+function pointCountForSection(section: BaiduIndexSection): Record<string, number> {
+  return Object.fromEntries(section.trends.map((trend) => [trend.word, trend.points.length]));
 }
 
 function hasTrendPoints(section: BaiduIndexSection): boolean {
@@ -414,10 +506,7 @@ function buildBaiduCollectOutput(
   unavailableWords: string[],
   noDataReason?: string,
 ): CollectOutput {
-  const status = hasOverviewData(searchResult.overview) ||
-      hasOverviewData(feedResult.overview) ||
-      searchResult.trends.length > 0 ||
-      feedResult.trends.length > 0
+  const status = hasTrendPoints(searchResult) || hasTrendPoints(feedResult)
     ? "ok"
     : "no_data";
   const reason = noDataReason ||
@@ -583,11 +672,7 @@ async function collectTrendData(
 ): Promise<BaiduIndexSection> {
   const apiUrl = buildApiPath(options, kind);
   try {
-    const rawResponse =
-      intercepted.find((item) => hasWords(item, options.words) && hasDateRange(item, options)) ||
-      intercepted.find((item) => hasWords(item, options.words)) ||
-      intercepted[0] ||
-      (collectOptions.allowDirectApi || collectOptions.allowFallbackApi ? await fetchIndexApi(page, options, kind) : undefined);
+    const rawResponse = await selectBaiduIndexResponse(page, options, kind, intercepted, collectOptions);
     if (!rawResponse) {
       return {
         apiUrl,
@@ -596,7 +681,7 @@ async function collectTrendData(
         error: `Baidu ${kind} index returned no trend data: page response not captured`,
       };
     }
-    const raw = await ensureDecrypted(page, rawResponse, kind);
+    const raw = await ensureDecrypted(page, rawResponse, kind, options);
 
     if (!rawIndexes(raw).length) {
       return {
@@ -624,6 +709,84 @@ async function collectTrendData(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export async function selectBaiduIndexResponseForTest(
+  options: Options,
+  kind: BaiduIndexKind,
+  intercepted: SearchIndexResponse[],
+): Promise<SearchIndexResponse | undefined> {
+  return selectBaiduIndexResponse({} as PageLike, options, kind, intercepted, {});
+}
+
+async function selectBaiduIndexResponse(
+  page: PageLike,
+  options: Options,
+  kind: BaiduIndexKind,
+  intercepted: SearchIndexResponse[],
+  collectOptions: { allowDirectApi?: boolean; allowFallbackApi?: boolean },
+): Promise<SearchIndexResponse | undefined> {
+  const exactIntercepted = intercepted.find((item) => hasWords(item, options.words) && hasDateRange(item, options));
+  if (exactIntercepted) return exactIntercepted;
+
+  const interceptedWithWords = intercepted.find((item) => hasWords(item, options.words));
+  if (interceptedWithWords) {
+    writeDiagnostics(options, {
+      event: "page_response_selected",
+      source: "baidu",
+      mode: options.baiduMode,
+      dataSource: "page",
+      reason: hasExplicitDateRange(options)
+        ? "captured page response matched words but not exact date range"
+        : "captured page response matched words",
+      details: {
+        kind,
+        capturedResponses: intercepted.length,
+        capturedWithWords: intercepted.filter((item) => hasWords(item, options.words)).length,
+        ranges: baiduResponseRanges(interceptedWithWords),
+      },
+    });
+    return interceptedWithWords;
+  }
+
+  if (collectOptions.allowDirectApi || collectOptions.allowFallbackApi) {
+    try {
+      writeDiagnostics(options, {
+        event: "response_retry",
+        source: "baidu",
+        mode: options.baiduMode,
+        dataSource: "api",
+        retry: true,
+        reason: "captured page response missing exact date range",
+        details: {
+          kind,
+          capturedResponses: intercepted.length,
+          capturedWithWords: intercepted.filter((item) => hasWords(item, options.words)).length,
+        },
+      });
+      const direct = await fetchIndexApi(page, options, kind);
+      if (hasWords(direct, options.words) && hasDateRange(direct, options)) return direct;
+      if (hasExplicitDateRange(options)) return direct;
+      return direct;
+    } catch {
+      // Fall through to the best page-captured response below.
+    }
+  }
+
+  if (!hasExplicitDateRange(options)) {
+    return intercepted.find((item) => hasWords(item, options.words)) || intercepted[0];
+  }
+  return undefined;
+}
+
+function baiduResponseRanges(response: SearchIndexResponse): { startDate?: string; endDate?: string }[] {
+  return rawIndexes(response).flatMap((item) => isFeedIndexGroup(item)
+    ? [{ startDate: item.startDate, endDate: item.endDate }]
+    : [item.all, item.pc, item.wise].filter(Boolean).map((series) => ({
+      startDate: series?.startDate,
+      endDate: series?.endDate,
+    }))
+  );
 }
 
 async function extractBaiduOverviews(
@@ -687,7 +850,7 @@ async function fetchIndexApi(page: PageLike, options: Options, kind: BaiduIndexK
   }, apiPath) as SearchIndexResponse;
 
   if (!result.data?.uniqid) return result;
-  return ensureDecrypted(page, result, kind);
+  return ensureDecrypted(page, result, kind, options);
 }
 
 async function evaluateBaiduApiInPage<Arg, Result>(
@@ -782,7 +945,7 @@ async function waitForBaiduLogin(
 
 const contextStatusHandlers = new WeakMap<BrowserContextLike, (message: string) => void>();
 const contextQuietStatus = new WeakSet<BrowserContextLike>();
-const BAIDU_RESPONSE_CAPTURE_TIMEOUT_MS = 1_500;
+const BAIDU_RESPONSE_CAPTURE_TIMEOUT_MS = 8_000;
 
 function emitStatus(options: Options, message: string): void {
   options.onStatus?.(message);
@@ -804,8 +967,9 @@ function queueBaiduResponseCapture(
   response: ResponseLike,
   intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
   tasks: Set<Promise<void>>,
+  options?: Options,
 ): void {
-  const task = captureBaiduApiResponse(response, intercepted);
+  const task = captureBaiduApiResponse(response, intercepted, options);
   if (!task) return;
   tasks.add(task);
   task.finally(() => tasks.delete(task));
@@ -814,10 +978,27 @@ function queueBaiduResponseCapture(
 function captureBaiduApiResponse(
   response: ResponseLike,
   intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
+  options?: Options,
 ): Promise<void> | undefined {
   const kind = baiduApiKindFromUrl(response.url());
   if (!kind) return undefined;
   return readJsonResponse<SearchIndexResponse>(response).then((json) => {
+    if (options) {
+      writeDiagnostics(options, {
+        event: "baidu_intercept_response",
+        source: "baidu",
+        mode: options.baiduMode,
+        dataSource: "page",
+        status: response.status?.().toString(),
+        details: {
+          kind,
+          url: response.url(),
+          requestMethod: safeRequestMethod(response),
+          requestPostData: safeRequestPostData(response),
+          response: json,
+        },
+      });
+    }
     if (json) intercepted[kind]?.push(json);
   });
 }
@@ -838,6 +1019,47 @@ async function waitForBaiduApiResponses(
     );
     queueBaiduResponseCapture(response, intercepted, tasks);
   }));
+}
+
+function safeRequestMethod(response: ResponseLike): string | undefined {
+  try {
+    return response.request?.().method?.();
+  } catch {
+    return undefined;
+  }
+}
+
+function safeRequestPostData(response: ResponseLike): string | null | undefined {
+  try {
+    return response.request?.().postData?.();
+  } catch {
+    return undefined;
+  }
+}
+
+async function waitForBaiduInitialData(
+  page: PageLike,
+  options: Options,
+  intercepted: Partial<Record<BaiduIndexKind, SearchIndexResponse[]>>,
+  tasks: Set<Promise<void>>,
+): Promise<void> {
+  const deadline = Date.now() + Math.min(options.timeoutMs, BAIDU_RESPONSE_CAPTURE_TIMEOUT_MS);
+  while (Date.now() < deadline) {
+    await flushBaiduResponseCaptures(tasks);
+    if (interceptedHasAllWords(intercepted, options.words)) return;
+    if (await pageMentionsBaiduOverview(page, options.words)) return;
+    await page.waitForTimeout(250);
+  }
+}
+
+async function pageMentionsBaiduOverview(page: PageLike, words: string[]): Promise<boolean> {
+  try {
+    const text = await readBaiduPageText(page);
+    return /搜索指数概览|百度指数数据概览|资讯指数概览/.test(text) &&
+      words.some((word) => text.includes(word));
+  } catch {
+    return false;
+  }
 }
 
 async function flushBaiduResponseCaptures(tasks: Set<Promise<void>>): Promise<void> {
@@ -933,30 +1155,44 @@ async function ensureDecrypted(
   page: PageLike,
   response: SearchIndexResponse,
   kind: BaiduIndexKind,
+  options: Options,
 ): Promise<SearchIndexResponse> {
   if (!response.data?.uniqid || isAlreadyDecoded(response, kind)) return response;
 
-  const key = await fetchDecryptKey(page, response.data.uniqid);
+  const key = await fetchDecryptKey(page, response.data.uniqid, options);
   return decryptIndexResponse(response, key, kind);
 }
 
-async function fetchDecryptKey(page: PageLike, uniqid: string): Promise<string> {
+async function fetchDecryptKey(page: PageLike, uniqid: string, options: Options): Promise<string> {
   const path = `/Interface/ptbk?uniqid=${encodeURIComponent(uniqid)}`;
-  const result = await evaluateBaiduApiInPage(page, async (url) => {
-    const response = await fetch(url, {
-      credentials: "include",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "X-Requested-With": "XMLHttpRequest",
-      },
-    });
-    return response.json();
-  }, path) as { data?: string };
-
-  if (!result.data) {
-    throw new Error("Baidu Index decrypt key response did not include data");
+  const delays = [0, 800, 1_800];
+  let lastResult: { data?: string; status?: number; message?: string } | undefined;
+  for (const [attempt, delay] of delays.entries()) {
+    if (delay > 0) await page.waitForTimeout(delay);
+    const result = await evaluateBaiduApiInPage(page, async (url) => {
+      const response = await fetch(url, {
+        credentials: "include",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      return response.json();
+    }, path) as { data?: string; status?: number; message?: string };
+    lastResult = result;
+    if (result.data) return result.data;
+    if (attempt < delays.length - 1) {
+      writeDiagnostics(options, {
+        event: "decrypt_key_retry",
+        source: "baidu",
+        mode: options.baiduMode,
+        retry: true,
+        reason: "decrypt key response did not include data",
+        details: { uniqid, status: result.status, message: result.message, attempt: attempt + 1 },
+      });
+    }
   }
-  return result.data;
+  throw new Error(`Baidu Index decrypt key response did not include data${lastResult?.message ? `: ${lastResult.message}` : ""}`);
 }
 
 function buildApiPath(options: Options, kind: BaiduIndexKind = "search"): string {
@@ -1092,10 +1328,35 @@ async function waitForIndexPage(page: PageLike, timeoutMs: number): Promise<void
 
 async function detectUnavailableWords(page: PageLike, words: string[]): Promise<string[]> {
   try {
-    const text = await page.locator("body").innerText({ timeout: 2_000 });
+    const text = await readBaiduPageText(page);
     return unavailableWordsFromText(text, words);
   } catch {
     return [];
+  }
+}
+
+async function readBaiduPageText(page: PageLike): Promise<string> {
+  try {
+    return await page.evaluate<undefined, string>((unused) => {
+      void unused;
+      const clone = document.body.cloneNode(true) as HTMLElement;
+      clone
+        .querySelectorAll(
+          [
+            "#ohmytrends-status",
+            "#ohmytrends-status-style",
+            "#ohmytrends-baidu-login-guide",
+            "#ohmytrends-baidu-login-guide-style",
+            "[id^='ohmytrends-']",
+            "[class^='ohmytrends-']",
+            "[class*=' ohmytrends-']",
+          ].join(","),
+        )
+        .forEach((node) => node.remove());
+      return clone.innerText || clone.textContent || "";
+    }, undefined);
+  } catch {
+    return await page.locator("body").innerText({ timeout: 2_000 });
   }
 }
 
@@ -1174,6 +1435,10 @@ function hasDateRange(response: SearchIndexResponse, options: Pick<Options, "sta
     (!options.startDate || range.startDate === options.startDate) &&
     (!options.endDate || range.endDate === options.endDate)
   );
+}
+
+function hasExplicitDateRange(options: Pick<Options, "startDate" | "endDate">): boolean {
+  return Boolean(options.startDate || options.endDate);
 }
 
 function inferUnavailableWords(words: string[], response: SearchIndexResponse): string[] {

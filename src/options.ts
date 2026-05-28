@@ -1,6 +1,9 @@
 import {
   buildBaiduTrendUrl,
+  DEFAULT_BAIDU_COOLDOWN_MS,
+  DEFAULT_BAIDU_MIN_INTERVAL_MS,
   DEFAULT_BAIDU_PROFILE_DIR,
+  DEFAULT_DIAGNOSTICS_LOG,
   DEFAULT_GOOGLE_PROFILE_DIR,
   DEFAULT_LOGIN_TIMEOUT_MS,
   DEFAULT_OUT,
@@ -29,6 +32,7 @@ export function readOptions(args: string[]): Options {
   const profileDir = readFlag(args, "--profile-dir") ||
     profileDirFromEnvironment(source) ||
     defaultProfileDir(source);
+  const diagnosticsLog = readDiagnosticsLogPath(args);
   return {
     source,
     lang: readLanguage(args),
@@ -41,6 +45,8 @@ export function readOptions(args: string[]): Options {
     raw: readFlag(args, "--raw") === "true",
     headless: readBooleanOption(args, "--headless", "OHMYTRENDS_HEADLESS", true),
     keepOpen: readBooleanOption(args, "--keep-open", "OHMYTRENDS_KEEP_OPEN", false),
+    diagnosticsLogPath: diagnosticsLog.path,
+    diagnosticsLogDefault: diagnosticsLog.isDefault,
     timeoutMs: readPositiveNumber(
       readFlag(args, "--timeout-ms") || process.env.BAIDU_INDEX_TIMEOUT_MS,
       DEFAULT_TIMEOUT_MS,
@@ -52,6 +58,17 @@ export function readOptions(args: string[]): Options {
       DEFAULT_LOGIN_TIMEOUT_MS,
       "--login-timeout-ms",
     ),
+    baiduRateLimit: readBooleanOption(args, "--baidu-rate-limit", "OHMYTRENDS_BAIDU_RATE_LIMIT", true),
+    baiduMinIntervalMs: readNonNegativeNumber(
+      readFlag(args, "--baidu-min-interval-ms") || process.env.OHMYTRENDS_BAIDU_MIN_INTERVAL_MS,
+      DEFAULT_BAIDU_MIN_INTERVAL_MS,
+      "--baidu-min-interval-ms",
+    ),
+    baiduCooldownMs: readNonNegativeNumber(
+      readFlag(args, "--baidu-cooldown-ms") || process.env.OHMYTRENDS_BAIDU_COOLDOWN_MS,
+      DEFAULT_BAIDU_COOLDOWN_MS,
+      "--baidu-cooldown-ms",
+    ),
     startDate: dateOptions.startDate,
     endDate: dateOptions.endDate,
     days: dateOptions.days,
@@ -62,6 +79,18 @@ export function readOptions(args: string[]): Options {
     geo: readFlag(args, "--geo") || "",
     area: readFlag(args, "--area") || "0",
   };
+}
+
+function readDiagnosticsLogPath(args: string[]): { path?: string; isDefault: boolean } {
+  const value = readFlag(args, "--log") ?? process.env.OHMYTRENDS_LOG;
+  if (value !== undefined) {
+    const normalized = value.trim();
+    if (!normalized || ["0", "false", "off", "none"].includes(normalized.toLowerCase())) {
+      return { isDefault: false };
+    }
+    return { path: normalized, isDefault: false };
+  }
+  return { path: DEFAULT_DIAGNOSTICS_LOG, isDefault: true };
 }
 
 function readBaiduCollectMode(args: string[]): BaiduCollectMode {
@@ -160,6 +189,13 @@ function readPositiveNumber(value: string | undefined, fallback: number, label: 
   const number = Number(value);
   if (Number.isFinite(number) && number > 0) return number;
   throw new Error(`Invalid ${label}: ${value}. Expected a positive number`);
+}
+
+function readNonNegativeNumber(value: string | undefined, fallback: number, label: string): number {
+  if (value === undefined) return fallback;
+  const number = Number(value);
+  if (Number.isFinite(number) && number >= 0) return number;
+  throw new Error(`Invalid ${label}: ${value}. Expected a non-negative number`);
 }
 
 function readBooleanOption(args: string[], flag: string, envName: string, fallback: boolean): boolean {

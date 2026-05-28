@@ -15,6 +15,11 @@ import {
   loginStatusLines,
   menuItemsFor,
   menuSubtitle,
+  querySourceOptionsFor,
+  sourceForGate,
+  switchLoginLoginArgsForTarget,
+  switchLoginLogoutArgsForTarget,
+  switchLoginOptionsFor,
 } from "../src/menu-prompts.js";
 
 describe("main menu prompt helpers", () => {
@@ -23,12 +28,15 @@ describe("main menu prompt helpers", () => {
     expect(labelFor("login-google", { baidu: false, google: false, ready: false }, "zh")).toBe("登录 Google 账号");
     expect(labelFor("login-baidu", { baidu: false, google: false, ready: false }, "zh")).toBe("登录百度账号");
     expect(labelFor("get", { baidu: true, google: true, ready: true }, "zh")).toBe("通过 CLI 查询数据");
+    expect(labelFor("switch-login", { baidu: true, google: true, ready: true }, "zh")).toBe("切换登录账号");
     expect(descriptionFor("serve", { baidu: true, google: true, ready: true }, "zh")).toContain("127.0.0.1:3000");
+    expect(descriptionFor("switch-login", { baidu: true, google: true, ready: true }, "zh")).toContain("清理已保存");
     expect(descriptionFor(undefined, undefined, "zh")).toBe("请选择一个操作。");
     expect(labelFor("login", { baidu: false, google: false, ready: false }, "en")).toBe("Log in to all accounts");
     expect(labelFor("login-google", { baidu: false, google: false, ready: false }, "en")).toBe("Log in to Google");
     expect(labelFor("login-baidu", { baidu: false, google: false, ready: false }, "en")).toBe("Log in to Baidu");
     expect(labelFor("get", { baidu: true, google: true, ready: true }, "en")).toBe("Query in terminal");
+    expect(labelFor("switch-login", { baidu: true, google: true, ready: true }, "en")).toBe("Switch login account");
   });
 
   test("renders subtitle for selected action", () => {
@@ -42,6 +50,7 @@ describe("main menu prompt helpers", () => {
   test("renders action messages", () => {
     expect(actionMessage("login")).toContain("login");
     expect(actionMessage("import")).toContain("扫描");
+    expect(actionMessage("switch-login")).toContain("切换登录账号");
   });
 
   test("builds terminal query args from prompt answers", () => {
@@ -68,6 +77,71 @@ describe("main menu prompt helpers", () => {
     ]);
   });
 
+  test("builds query source options from login state", () => {
+    const both = { baidu: true, google: true, ready: true };
+    expect(sourceForGate(both)).toBe("all");
+    expect(querySourceOptionsFor(both, "zh")).toEqual([
+      {
+        label: "同时查询",
+        value: "all",
+        hint: "同时获取两个数据源",
+        disabled: false,
+      },
+      {
+        label: "仅查询 Google Trends",
+        value: "google",
+        hint: "只使用 Google Trends",
+        disabled: false,
+      },
+      {
+        label: "仅查询百度指数",
+        value: "baidu",
+        hint: "只使用百度指数",
+        disabled: false,
+      },
+    ]);
+
+    const onlyGoogle = { baidu: false, google: true, ready: false };
+    expect(sourceForGate(onlyGoogle)).toBe("google");
+    expect(querySourceOptionsFor(onlyGoogle, "zh").map((item) => [item.value, item.disabled])).toEqual([
+      ["all", true],
+      ["google", false],
+      ["baidu", true],
+    ]);
+
+    const onlyBaidu = { baidu: true, google: false, ready: false };
+    expect(sourceForGate(onlyBaidu)).toBe("baidu");
+    expect(querySourceOptionsFor(onlyBaidu, "en").map((item) => [item.label, item.value, item.disabled])).toEqual([
+      ["Query both", "all", true],
+      ["Only Google Trends", "google", true],
+      ["Only Baidu Index", "baidu", false],
+    ]);
+  });
+
+  test("builds switch login choices and login/logout args", () => {
+    expect(switchLoginOptionsFor("zh")).toEqual([
+      {
+        label: "切换全部账号",
+        value: "all",
+        hint: "重新登录两个账号",
+      },
+      {
+        label: "切换 Google Trends 账号",
+        value: "google",
+        hint: "重新登录 Google",
+      },
+      {
+        label: "切换百度指数账号",
+        value: "baidu",
+        hint: "重新登录百度",
+      },
+    ]);
+    expect(switchLoginLoginArgsForTarget("all")).toEqual([]);
+    expect(switchLoginLoginArgsForTarget("google")).toEqual(["--source", "google"]);
+    expect(switchLoginLogoutArgsForTarget("all")).toEqual(["all"]);
+    expect(switchLoginLogoutArgsForTarget("baidu")).toEqual(["baidu"]);
+  });
+
   test("uses login as the first step before run actions", () => {
     expect(menuItemsFor({ baidu: false, google: false, ready: false }, "zh").map((item) => item.value)).toEqual([
       "login",
@@ -85,6 +159,7 @@ describe("main menu prompt helpers", () => {
     expect(menuItemsFor({ baidu: true, google: true, ready: true }, "zh").map((item) => item.value)).toEqual([
       "get",
       "serve",
+      "switch-login",
     ]);
     expect(gateMessage({ baidu: true, google: false, ready: false }, "zh")).toContain("Google");
     expect(authStepMessage({ baidu: true, google: false, ready: false }, "zh")).not.toContain("第一步");
@@ -110,6 +185,7 @@ describe("main menu prompt helpers", () => {
     expect(detailFor("login-baidu", { baidu: false, google: true, ready: false }, "zh")).not.toContain("重新登录百度指数");
     expect(detailFor("login-google", { baidu: true, google: false, ready: false }, "zh")).toContain("Google Trends");
     expect(detailFor("serve", { baidu: true, google: true, ready: true }, "zh")).toContain("127.0.0.1:3000");
+    expect(detailFor("switch-login", { baidu: true, google: true, ready: true }, "zh")).toContain("修复登录");
     expect(helpFor("login-baidu", { baidu: false, google: true, ready: false }, "zh")).toContain("◇ 登录准备");
   });
 

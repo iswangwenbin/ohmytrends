@@ -92,6 +92,30 @@ describe("readOptions", () => {
     }
   });
 
+  test("reads diagnostics log path", () => {
+    const previous = process.env.OHMYTRENDS_LOG;
+    try {
+      delete process.env.OHMYTRENDS_LOG;
+      const defaults = readOptions(["--source", "baidu"]);
+      expect(defaults.diagnosticsLogPath).toBe("logs/events.jsonl");
+      expect(defaults.diagnosticsLogDefault).toBe(true);
+      const custom = readOptions(["--source", "baidu", "--log", "logs/debug.jsonl"]);
+      expect(custom.diagnosticsLogPath)
+        .toBe("logs/debug.jsonl");
+      expect(custom.diagnosticsLogDefault).toBe(false);
+      expect(readOptions(["--source", "baidu", "--log", "false"]).diagnosticsLogPath)
+        .toBeUndefined();
+
+      process.env.OHMYTRENDS_LOG = "logs/env-events.jsonl";
+      const fromEnv = readOptions(["--source", "baidu"]);
+      expect(fromEnv.diagnosticsLogPath).toBe("logs/env-events.jsonl");
+      expect(fromEnv.diagnosticsLogDefault).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.OHMYTRENDS_LOG;
+      else process.env.OHMYTRENDS_LOG = previous;
+    }
+  });
+
   test("reads dev browser mode defaults from environment variables", () => {
     const previousHeadless = process.env.OHMYTRENDS_HEADLESS;
     const previousKeepOpen = process.env.OHMYTRENDS_KEEP_OPEN;
@@ -228,6 +252,24 @@ describe("readOptions", () => {
 
   test("rejects invalid numeric options", () => {
     expect(() => readOptions(["--timeout-ms", "later"])).toThrow("Invalid --timeout-ms");
+    expect(() => readOptions(["--baidu-min-interval-ms", "-1"])).toThrow("Invalid --baidu-min-interval-ms");
+  });
+
+  test("reads Baidu rate limit options", () => {
+    const options = readOptions([
+      "--source",
+      "baidu",
+      "--baidu-min-interval-ms",
+      "5000",
+      "--baidu-cooldown-ms",
+      "30000",
+    ]);
+    expect(readOptions(["--source", "baidu"]).baiduRateLimit).toBe(true);
+    expect(options.baiduMinIntervalMs).toBe(5_000);
+    expect(options.baiduCooldownMs).toBe(30_000);
+    expect(readOptions(["--source", "baidu", "--baidu-min-interval-ms", "0"]).baiduMinIntervalMs).toBe(0);
+    expect(readOptions(["--source", "baidu", "--baidu-rate-limit", "false"]).baiduRateLimit).toBe(false);
+    expect(() => readOptions(["--source", "baidu", "--baidu-rate-limit", "maybe"])).toThrow("Invalid --baidu-rate-limit");
   });
 
   test("rejects invalid output format", () => {

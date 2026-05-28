@@ -1,5 +1,6 @@
 import { collectBaiduIndex, loginBaidu } from "./baidu.js";
 import { collectGoogleTrends, loginGoogle } from "./google.js";
+import { updateBaiduRateLimitFromOutput, waitForBaiduRateLimit } from "./rate-limit.js";
 import type { CollectOutput, Options, Source } from "./types.js";
 import { toUnifiedMultiSourceOutput, toUnifiedOutput, type UnifiedMultiSourceOutput, type UnifiedOutput } from "./unified-output.js";
 
@@ -62,11 +63,13 @@ function errorOutputFor(source: Source, options: Options, reason: unknown): Coll
 }
 
 export async function collectSource(source: Source, options: Options): Promise<CollectOutput> {
-  return await withProfileCollectionLock(source, options.profileDir, async () =>
-    source === "google"
-      ? await collectGoogleTrends(options)
-      : await collectBaiduIndex(options)
-  );
+  return await withProfileCollectionLock(source, options.profileDir, async () => {
+    if (source === "google") return await collectGoogleTrends(options);
+    await waitForBaiduRateLimit(options);
+    const output = await collectBaiduIndex(options);
+    await updateBaiduRateLimitFromOutput(options, output);
+    return output;
+  });
 }
 
 const profileCollectionLocks = new Map<string, Promise<void>>();

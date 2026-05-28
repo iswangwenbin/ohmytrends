@@ -10,6 +10,7 @@ import { hasGoogleLoginInProfile, verifyGoogleLogin } from "./google.js";
 import { readLanguage } from "./i18n.js";
 import { runtimeInfo } from "./logger.js";
 import { runLoginPrompts } from "./login-prompts.js";
+import { logoutProfiles } from "./logout.js";
 import { readOptions } from "./options.js";
 import { printOutputJson, printOutputSummary, writeJsonOutput, writeOutput } from "./output.js";
 import { collectAllSources, collectFailures, collectSource, optionsForSource } from "./runner.js";
@@ -18,7 +19,8 @@ import { importableSources, importBrowserSession, scanBrowserProfiles } from "./
 import { toUnifiedMultiSourceOutput, toUnifiedOutput } from "./unified-output.js";
 import type { Options, OutputFormat, Source, SourceOption, TerminalLanguage } from "./types.js";
 
-type MenuAction = "login" | "login-google" | "login-baidu" | "skip-login" | "import" | "get" | "serve" | "quit";
+type MenuAction = "login" | "login-google" | "login-baidu" | "skip-login" | "import" | "get" | "serve" | "switch-login" | "quit";
+export type SwitchLoginTarget = Source | "all";
 
 type MenuItem = {
   label: string;
@@ -41,7 +43,7 @@ function hasAnyLogin(gate: LoginGate): boolean {
   return gate.baidu || gate.google;
 }
 
-function sourceForGate(gate: LoginGate): SourceOption {
+export function sourceForGate(gate: LoginGate): SourceOption {
   if (gate.baidu && gate.google) return "all";
   if (gate.baidu) return "baidu";
   if (gate.google) return "google";
@@ -76,6 +78,11 @@ export async function runMainMenuPrompts(): Promise<void> {
     const action = await selectReadyStepAction(loginGate, lang);
     if (!action || action === "quit" || process.exitCode) return;
     const result = await runMenuAction(action, lang);
+    if (result === "refresh") {
+      if (process.exitCode) return;
+      loginGate = await detectVerifiedLoginGate();
+      continue;
+    }
     if (result !== "back") return;
   }
 }
@@ -140,7 +147,7 @@ export function menuSubtitle(
   ].join("\n");
 }
 
-type MenuActionResult = "done" | "back";
+type MenuActionResult = "done" | "back" | "refresh";
 type PromptCancelKey = "escape" | "interrupt" | undefined;
 
 async function runMenuAction(action: MenuAction | undefined, lang: TerminalLanguage = readLanguage()): Promise<MenuActionResult> {
@@ -170,6 +177,9 @@ async function runMenuAction(action: MenuAction | undefined, lang: TerminalLangu
   if (action === "serve") {
     await startServer(["--host", "127.0.0.1", "--port", "3000", "--lang", lang]);
   }
+  if (action === "switch-login") {
+    return await runSwitchLoginPrompts(lang);
+  }
   return "done";
 }
 
@@ -181,6 +191,7 @@ export function actionMessage(action: MenuAction): string {
   if (action === "import") return "准备扫描本地浏览器会话...";
   if (action === "get") return "get 采集表单后续会加入；当前请使用命令参数。";
   if (action === "serve") return "正在启动 HTTP API 服务...";
+  if (action === "switch-login") return "准备切换登录账号...";
   return "退出。";
 }
 
@@ -227,11 +238,14 @@ function sectionLine(label: string): string {
 }
 
 async function runTerminalQueryPrompts(lang: TerminalLanguage, gate: LoginGate = detectLoginGate()): Promise<MenuActionResult> {
-  const source = sourceForGate(gate);
   const range = "30d";
   const geoValue = "";
 
   while (true) {
+    const source = await selectTerminalQuerySource(gate, lang);
+    if (source === "exit") return "done";
+    if (source === "back") return "back";
+
     const format = await selectTerminalOutputFormat(lang);
     if (format === "exit") return "done";
     if (format === "back") return "back";
@@ -254,6 +268,23 @@ async function runTerminalQueryPrompts(lang: TerminalLanguage, gate: LoginGate =
   }
 }
 
+async function selectTerminalQuerySource(gate: LoginGate, lang: TerminalLanguage): Promise<SourceOption | "back" | "exit"> {
+  const copy = menuCopy(lang);
+  const { value: source, cancelKey } = await withPromptCancelKey(() => select<SourceOption>({
+    message: copy.selectQuerySource,
+    options: querySourceOptionsFor(gate, lang),
+    initialValue: sourceForGate(gate),
+  }));
+  if (isCancel(source)) {
+    if (cancelKey === "interrupt") {
+      cancel(copy.exited);
+      return "exit";
+    }
+    return "back";
+  }
+  return source;
+}
+
 async function selectTerminalOutputFormat(lang: TerminalLanguage): Promise<OutputFormat | "back" | "exit"> {
   const copy = menuCopy(lang);
   const { value: format, cancelKey } = await withPromptCancelKey(() => select<OutputFormat>({
@@ -272,6 +303,67 @@ async function selectTerminalOutputFormat(lang: TerminalLanguage): Promise<Outpu
     return "back";
   }
   return format;
+}
+
+async function runSwitchLoginPrompts(lang: TerminalLanguage): Promise<MenuActionResult> {
+  const copy = menuCopy(lang);
+  const { value: target, cancelKey } = await withPromptCancelKey(() => select<SwitchLoginTarget>({
+    message: copy.switchLoginSelectMessage,
+    options: switchLoginOptionsFor(lang),
+    initialValue: "all",
+  }));
+  if (isCancel(target)) {
+    if (cancelKey === "interrupt") {
+      cancel(copy.exited);
+      return "done";
+    }
+    return "back";
+  }
+
+  await closeKeptOpenContexts();
+  log.info(copy.switchLoginClearing(switchLoginTargetLabel(target, lang)));
+  const results = await logoutProfiles(switchLoginLogoutArgsForTarget(target));
+  for (const result of results) {
+    log.info(copy.switchLoginCleared(sourceLabel(result.source, lang), result.profileDir));
+  }
+  await runLoginPrompts(switchLoginLoginArgsForTarget(target));
+  return "refresh";
+}
+
+export function switchLoginOptionsFor(
+  lang: TerminalLanguage = readLanguage(),
+): Array<{ label: string; value: SwitchLoginTarget; hint: string }> {
+  const copy = menuCopy(lang);
+  return [
+    {
+      label: copy.switchLoginAll,
+      value: "all",
+      hint: copy.switchLoginAllHint,
+    },
+    {
+      label: copy.switchLoginGoogle,
+      value: "google",
+      hint: copy.switchLoginGoogleHint,
+    },
+    {
+      label: copy.switchLoginBaidu,
+      value: "baidu",
+      hint: copy.switchLoginBaiduHint,
+    },
+  ];
+}
+
+export function switchLoginLoginArgsForTarget(target: SwitchLoginTarget): string[] {
+  return target === "all" ? [] : ["--source", target];
+}
+
+export function switchLoginLogoutArgsForTarget(target: SwitchLoginTarget): string[] {
+  return [target];
+}
+
+function switchLoginTargetLabel(target: SwitchLoginTarget, lang: TerminalLanguage): string {
+  if (target === "all") return lang === "zh" ? "全部账号" : "all accounts";
+  return sourceLabel(target, lang);
 }
 
 type TerminalQueryPromptAction = "continue" | "back" | "exit";
@@ -368,6 +460,35 @@ export function buildTerminalQueryArgs(input: {
   if (input.geo?.trim()) args.push("--geo", input.geo.trim().toUpperCase());
   args.push("--lang", input.lang || readLanguage());
   return args;
+}
+
+export function querySourceOptionsFor(
+  gate: LoginGate,
+  lang: TerminalLanguage = readLanguage(),
+): Array<{ label: string; value: SourceOption; hint?: string; disabled?: boolean }> {
+  const copy = menuCopy(lang);
+  const baiduMissing = !gate.baidu;
+  const googleMissing = !gate.google;
+  return [
+    {
+      label: copy.querySourceAll,
+      value: "all",
+      hint: baiduMissing || googleMissing ? copy.querySourceRequiresBoth : copy.querySourceAllHint,
+      disabled: baiduMissing || googleMissing,
+    },
+    {
+      label: copy.querySourceGoogle,
+      value: "google",
+      hint: googleMissing ? copy.querySourceGoogleMissing : copy.querySourceGoogleHint,
+      disabled: googleMissing,
+    },
+    {
+      label: copy.querySourceBaidu,
+      value: "baidu",
+      hint: baiduMissing ? copy.querySourceBaiduMissing : copy.querySourceBaiduHint,
+      disabled: baiduMissing,
+    },
+  ];
 }
 
 async function runTerminalQuery(args: string[], optionsOverride: { skipLoginVerify?: boolean } = {}): Promise<void> {
@@ -841,13 +962,19 @@ function readyStepItemsFor(lang: TerminalLanguage): MenuItem[] {
         label: "通过 CLI 查询数据",
         value: "get",
         description: "使用终端命令查询 Google Trends 和百度指数数据。",
-        hint: "适合直接在终端查看结果或输出 JSON 数据。",
+        hint: "终端查看或输出 JSON",
       },
       {
         label: "通过 API 查询数据",
         value: "serve",
         description: "启动 HTTP API 服务。默认监听 127.0.0.1:3000。",
-        hint: "适合给本地应用或脚本调用。",
+        hint: "本地应用或脚本调用",
+      },
+      {
+        label: "切换登录账号",
+        value: "switch-login",
+        description: "清理已保存的登录会话，然后重新登录百度或 Google。",
+        hint: "更换账号或修复登录",
       },
     ];
   }
@@ -857,13 +984,19 @@ function readyStepItemsFor(lang: TerminalLanguage): MenuItem[] {
       label: "Query in terminal",
       value: "get",
       description: "Query Google Trends and Baidu Index data from the terminal.",
-      hint: "Best for viewing tables in the terminal or outputting JSON.",
+      hint: "View table or output JSON",
     },
     {
       label: "Query through API",
       value: "serve",
       description: "Start the HTTP API server. It listens on 127.0.0.1:3000 by default.",
-      hint: "Best for local apps or scripts.",
+      hint: "For local apps or scripts",
+    },
+    {
+      label: "Switch login account",
+      value: "switch-login",
+      description: "Clear saved login sessions, then log in to Baidu or Google again.",
+      hint: "Change account or refresh login",
     },
   ];
 }
@@ -894,6 +1027,25 @@ function menuCopy(lang: TerminalLanguage) {
       tipPrefix: "提示：",
       runAction: "运行操作",
       loginPrep: "登录准备",
+      selectQuerySource: "请选择查询方式",
+      querySourceAll: "同时查询",
+      querySourceGoogle: "仅查询 Google Trends",
+      querySourceBaidu: "仅查询百度指数",
+      querySourceAllHint: "同时获取两个数据源",
+      querySourceGoogleHint: "只使用 Google Trends",
+      querySourceBaiduHint: "只使用百度指数",
+      querySourceRequiresBoth: "需要百度和 Google 都已登录",
+      querySourceGoogleMissing: "Google Trends 未登录",
+      querySourceBaiduMissing: "百度指数未登录",
+      switchLoginSelectMessage: "请选择要切换的登录账号",
+      switchLoginAll: "切换全部账号",
+      switchLoginGoogle: "切换 Google Trends 账号",
+      switchLoginBaidu: "切换百度指数账号",
+      switchLoginAllHint: "重新登录两个账号",
+      switchLoginGoogleHint: "重新登录 Google",
+      switchLoginBaiduHint: "重新登录百度",
+      switchLoginClearing: (target: string) => `正在清理 ${target} 的已保存登录状态...`,
+      switchLoginCleared: (source: string, profileDir: string) => `${source} 登录状态已清理：${profileDir}`,
       selectOutputFormat: "请选择输出格式",
       table: "表格",
       tableHint: "适合直接在终端查看",
@@ -946,6 +1098,25 @@ function menuCopy(lang: TerminalLanguage) {
     tipPrefix: "Tip: ",
     runAction: "Run action",
     loginPrep: "Login setup",
+    selectQuerySource: "Select query source",
+    querySourceAll: "Query both",
+    querySourceGoogle: "Only Google Trends",
+    querySourceBaidu: "Only Baidu Index",
+    querySourceAllHint: "Use both data sources",
+    querySourceGoogleHint: "Use Google Trends only",
+    querySourceBaiduHint: "Use Baidu Index only",
+    querySourceRequiresBoth: "Requires both Baidu and Google login",
+    querySourceGoogleMissing: "Google Trends is not logged in",
+    querySourceBaiduMissing: "Baidu Index is not logged in",
+    switchLoginSelectMessage: "Select the login account to switch",
+    switchLoginAll: "Switch all accounts",
+    switchLoginGoogle: "Switch Google Trends account",
+    switchLoginBaidu: "Switch Baidu Index account",
+    switchLoginAllHint: "Log in to both again",
+    switchLoginGoogleHint: "Log in to Google again",
+    switchLoginBaiduHint: "Log in to Baidu again",
+    switchLoginClearing: (target: string) => `Clearing saved login state for ${target}...`,
+    switchLoginCleared: (source: string, profileDir: string) => `${source} login state cleared: ${profileDir}`,
     selectOutputFormat: "Select output format",
     table: "Table",
     tableHint: "Best for reading in the terminal",

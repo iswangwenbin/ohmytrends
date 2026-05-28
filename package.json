@@ -64,7 +64,8 @@
     "cloakbrowser": "^0.3.31",
     "elysia": "^1.4.28",
     "figlet": "^1.11.0",
-    "playwright-core": "^1.60.0"
+    "playwright-core": "^1.60.0",
+    "string-width": "^8.2.1"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4",

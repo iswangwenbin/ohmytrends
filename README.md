@@ -57,7 +57,14 @@ account session.
 4. Query from another terminal:
 
 ```bash
+# Submit a query and copy the returned pollUrl.
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
+
+# Poll until status is succeeded or failed.
+curl "http://127.0.0.1:3000/api/trends/<query-id>"
+
+# Or wait on the same endpoint.
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d&wait=true"
 ```
 
 Run a CLI query instead:
@@ -83,8 +90,19 @@ bun run build
 
 ```bash
 bun run start
+# Submit a query and copy the returned pollUrl.
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
+
+# Poll until status is succeeded or failed.
+curl "http://127.0.0.1:3000/api/trends/<query-id>"
+
+# Or wait on the same endpoint.
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d&wait=true"
 ```
+
+`/api/trends` returns a queued query id by default. Poll the returned `pollUrl`
+until the status is `succeeded` or `failed`. Results are stored in SQLite, so
+they remain available after the server restarts.
 
 ## Usage
 

@@ -52,7 +52,14 @@ bun run start
 4. 在另一个终端查询：
 
 ```bash
+# 提交查询，复制返回的 pollUrl。
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
+
+# 轮询到 succeeded 或 failed。
+curl "http://127.0.0.1:3000/api/trends/<query-id>"
+
+# 或者在同一个接口上等待结果。
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d&wait=true"
 ```
 
 也可以直接运行 CLI 查询：
@@ -78,8 +85,18 @@ bun run build
 
 ```bash
 bun run start
+# 提交查询，复制返回的 pollUrl。
 curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d"
+
+# 轮询到 succeeded 或 failed。
+curl "http://127.0.0.1:3000/api/trends/<query-id>"
+
+# 或者在同一个接口上等待结果。
+curl "http://127.0.0.1:3000/api/trends?words=gemini%2Cclaude&source=all&range=30d&wait=true"
 ```
+
+`/api/trends` 默认返回排队后的查询 id。继续轮询返回的 `pollUrl`，直到状态为
+`succeeded` 或 `failed`。结果会写入 SQLite，服务重启后仍然可以查询。
 
 ## 使用
 

@@ -146,15 +146,21 @@ Main options:
 | `--format table|json` | Both | `table` | Stdout format. Use `json` for scripts and integrations. |
 | `--headless false` | Both | `true` | Always show the browser window. |
 | `--keep-open true` | Both | `false` | Keep a visible browser open after collection until `Ctrl+C`. |
+| `--log path.jsonl` | Both | `logs/events.jsonl` | JSONL log path. The default file records only intercepted raw requests/responses; an explicit `--log` path records full diagnostics. Use `--log false` to disable. |
 | `--login-timeout-ms 300000` | Both | `300000` | Manual login polling timeout. |
 | `--timeout-ms 60000` | Both | `60000` | Page/action timeout. |
+| `--queue true|false` | Server | `true` | In `serve` mode, make `/api/trends` create a SQLite-backed query and return its id. Set to `false` for synchronous local debugging. |
+| `--queue-db path.sqlite` | Server | `data/queue.sqlite` | SQLite queue database path for `serve` mode. |
+| `--baidu-rate-limit true|false` | Baidu | `true` | Enable Baidu frequency control. Set to `false` to bypass both spacing and cooldown waits. |
+| `--baidu-min-interval-ms 15000` | Baidu | `15000` | Minimum spacing between Baidu queries for the same profile. Use `0` to disable. |
+| `--baidu-cooldown-ms 120000` | Baidu | `120000` | Cooldown after Baidu rate-limit responses. Use `0` to disable. |
 | `--raw true` | Both | `false` | Include raw third-party API responses. Use only for local debugging. |
 | `--start-date YYYY-MM-DD` | Both | Source-specific | Custom range start. |
 | `--end-date YYYY-MM-DD` | Both | Source-specific | Custom range end. |
 | `--range 1h|4h|1d|7d|30d|90d|180d|1y|5y|all` | Both | `30d` | Unified source-neutral range. |
 | `--area 0` | Baidu | `0` | Baidu area code. |
-| `--baidu-mode page|api` | Baidu | `page` | Baidu collection mode. `page` navigates to the trend URL and intercepts the page's own search/feed index XHRs (falls back to `api` automatically on failure); `api` calls the search/feed index endpoints directly from the authenticated context. |
-| `--google-mode page|api` | Google | `page` | Google collection mode. `page` opens the explore UI and intercepts the responses (matches real-user traffic, falls back to `api` automatically on failure or empty data); `api` calls the internal Trends APIs directly from the authenticated page (faster but more easily rate-limited). |
+| `--baidu-mode page|api` | Baidu | `page` | Baidu collection mode. `page` navigates to the trend URL and intercepts the page's own search/feed index XHRs; page failures are surfaced directly. `api` calls the search/feed index endpoints directly from the authenticated context. |
+| `--google-mode page|api` | Google | `page` | Google collection mode. `page` opens the explore UI and intercepts the responses; page failures or empty data are surfaced directly. `api` calls the internal Trends APIs directly from the authenticated page (faster but more easily rate-limited). |
 | `--geo US` | Google | Global | Google Trends geographic region. |
 | `--lang en|zh` | Both | System locale | Terminal language. |
 
@@ -184,6 +190,9 @@ Environment variables:
 | `OHMYTRENDS_GOOGLE_TIMING` | Set to `true` to print per-stage timings for Google collection (for diagnosing slow runs). |
 | `OHMYTRENDS_HOST` | Default HTTP API host. |
 | `OHMYTRENDS_PORT` | Default HTTP API port. |
+| `OHMYTRENDS_QUEUE` | Set to `false` to bypass the queue for direct `/api/trends` requests in `serve` mode. |
+| `OHMYTRENDS_QUEUE_DB` | SQLite queue database path for `serve` mode. |
+| `OHMYTRENDS_BAIDU_RATE_LIMIT` | Set to `false` to disable Baidu frequency control. |
 | `BAIDU_INDEX_TIMEOUT_MS` | Default action timeout. |
 | `BAIDU_INDEX_LOGIN_TIMEOUT_MS` | Default login polling timeout. |
 
@@ -197,6 +206,15 @@ bun src/cli.ts serve --host 127.0.0.1 --port 3000
 ```
 
 `bun run start` is a shortcut for `bun src/cli.ts serve` with defaults.
+`/api/trends` requests create SQLite-backed query jobs by default and return a
+query id immediately. Poll `GET /api/trends/<query-id>` for status and results.
+Repeated requests for the same source/profile are serialized and share the same
+Baidu frequency controls. Add `wait=true` to the same `/api/trends` request when
+you want the HTTP request to wait for the queued job to finish. You can also
+disable queueing with `--queue false` or `OHMYTRENDS_QUEUE=false` to make
+`/api/trends` return the final result synchronously for local debugging.
+Queued jobs are persisted in `data/queue.sqlite` by default. Override with
+`--queue-db path/to/queue.sqlite` or `OHMYTRENDS_QUEUE_DB`.
 
 Open `http://127.0.0.1:3000` for a built-in client example page. It requests
 `/api/trends` with `fetch()` and renders the returned unified JSON.
@@ -207,13 +225,13 @@ Health check:
 curl http://127.0.0.1:3000/health
 ```
 
-Query with GET:
+Submit a query with GET:
 
 ```bash
 curl "http://127.0.0.1:3000/api/trends?source=google&words=gemini&geo=US&range=30d"
 ```
 
-Query with POST:
+Submit a query with POST:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/trends \
@@ -221,8 +239,61 @@ curl -X POST http://127.0.0.1:3000/api/trends \
   -d '{"source":"all","words":["gemini","claude"],"range":"30d"}'
 ```
 
-The API returns the same unified JSON shape as `get --format json`. See
-[`json-output.md`](json-output.md) for the response contract.
+Both forms return `202 Accepted` with a query id:
+
+```json
+{
+  "id": "<query-id>",
+  "queryId": "<query-id>",
+  "status": "queued",
+  "pollUrl": "/api/trends/<query-id>"
+}
+```
+
+Poll the query result:
+
+```bash
+curl http://127.0.0.1:3000/api/trends/<query-id>
+```
+
+When the job succeeds, the response status is `succeeded` and `result` contains
+the same unified JSON shape as `get --format json`. Failed jobs return
+`status: "failed"` with an `error` message and HTTP 500 from the polling route.
+See [`json-output.md`](json-output.md) for the result contract.
+
+Use `wait=true` on the same endpoint when you explicitly want the request to
+block until collection finishes while still going through the queue. Add
+`waitTimeoutMs` to cap how long the HTTP request waits; if the cap is reached,
+the API returns the current job status and `pollUrl` with HTTP 202 so clients can
+continue polling.
+
+```bash
+curl "http://127.0.0.1:3000/api/trends?source=google&words=gemini&geo=US&range=30d&wait=true"
+curl "http://127.0.0.1:3000/api/trends?source=google&words=gemini&wait=true&waitTimeoutMs=30000"
+curl -X POST http://127.0.0.1:3000/api/trends \
+  -H "content-type: application/json" \
+  -d '{"source":"all","words":["gemini","claude"],"range":"30d","wait":true,"waitTimeoutMs":30000}'
+```
+
+The older explicit jobs path and synchronous path are still available as
+compatibility aliases:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/trends/jobs \
+  -H "content-type: application/json" \
+  -d '{"source":"baidu","words":["gpt"],"range":"30d"}'
+curl "http://127.0.0.1:3000/api/trends/sync?source=google&words=gemini&geo=US&range=30d"
+```
+
+Check job status:
+
+```bash
+curl http://127.0.0.1:3000/api/trends/jobs/<job-id>
+curl "http://127.0.0.1:3000/api/trends/jobs?limit=20"
+```
+
+The queue is SQLite-backed and survives server restarts. Jobs run in the
+background and reuse the same Baidu frequency controls as direct collection.
 
 First-time use may still require manual login. For server usage, initialize
 sessions before starting the API:
@@ -235,8 +306,9 @@ sessions before starting the API:
 Supported request fields match the CLI option names in camelCase:
 `source`, `words`, `range`, `startDate`, `endDate`, `geo`, `area`,
 `profileDir`, `raw`, `headless`, `keepOpen`, `timeoutMs`, and
-`loginTimeoutMs`. The API also accepts `lang` (`en` or `zh`) for localized
-runtime messages.
+`loginTimeoutMs`. It also accepts `baiduRateLimit`, `baiduMinIntervalMs`,
+`baiduCooldownMs`, `baiduMode`, `googleMode`, `log`, `wait`, `waitTimeoutMs`,
+and `lang` (`en` or `zh`) for localized runtime messages.
 
 ## Login Flow
 
@@ -288,9 +360,9 @@ returned under `relatedQueries`.
 
 Google defaults to `--google-mode page`. Page mode opens the Trends explore UI
 and intercepts the responses the page itself makes. The request pattern matches
-a real user and is far less likely to trip anti-bot heuristics. If page mode
-returns no data or fails, the collector **automatically falls back to `api`
-mode** on the same authenticated page.
+a real user and is far less likely to trip anti-bot heuristics. Page mode does
+not fall back to `api`; use `--google-mode api` explicitly when you want to
+compare the direct API path.
 
 ```bash
 bun src/cli.ts get --source google --words "gemini" --google-mode page
@@ -391,7 +463,8 @@ Baidu defaults to `--baidu-mode page`. Page mode navigates directly to the
 trend URL and intercepts the search/feed index XHRs the page itself fires.
 The request pattern matches what a real Baidu Index user would generate and
 is less likely to trip anti-bot heuristics than constructing the API URLs by
-hand. If page mode fails, the collector falls back to `api` mode.
+hand. Page mode does not fall back to `api`; use `--baidu-mode api` explicitly
+when you want to test the direct API path.
 
 ```bash
 bun src/cli.ts get --source baidu --words "微信指数,google" --baidu-mode page

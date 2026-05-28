@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { styleText } from "node:util";
+import stringWidth from "string-width";
 import type { ChangeMetric, CollectOutput, IndexPoint, Options, TerminalLanguage } from "./types.js";
 
 export function writeOutput(output: CollectOutput, out: string): void {
@@ -220,18 +221,26 @@ function outputLabels(lang: TerminalLanguage) {
   };
 }
 
-function printTable(headers: string[], rows: string[][]): void {
+export function renderTable(headers: string[], rows: string[][]): string {
   const widths = headers.map((header, index) =>
-    Math.max(header.length, ...rows.map((row) => row[index]?.length || 0)),
+    Math.max(stringWidth(header), ...rows.map((row) => stringWidth(row[index] || ""))),
   );
   const renderRow = (row: string[]) =>
-    row.map((cell, index) => cell.padEnd(widths[index])).join("  ");
+    row.map((cell, index) => padCell(cell, widths[index])).join("  ");
 
-  console.log(renderRow(headers));
-  console.log(widths.map((width) => "-".repeat(width)).join("  "));
-  for (const row of rows) {
-    console.log(renderRow(row));
-  }
+  return [
+    renderRow(headers),
+    widths.map((width) => "-".repeat(width)).join("  "),
+    ...rows.map((row) => renderRow(row)),
+  ].join("\n");
+}
+
+function printTable(headers: string[], rows: string[][]): void {
+  console.log(renderTable(headers, rows));
+}
+
+function padCell(value: string, width: number): string {
+  return `${value}${" ".repeat(Math.max(0, width - stringWidth(value)))}`;
 }
 
 function formatNullable(value: number | null): string {
