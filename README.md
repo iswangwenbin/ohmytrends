@@ -1,5 +1,8 @@
 # ohmytrends
 
+> [!IMPORTANT]
+> Use a dedicated secondary account for login instead of an important personal account. Please keep query frequency reasonable and avoid high-volume or batch requests. ohmytrends can only help retrieve trend data when your logged-in session can normally access the corresponding service; it cannot bypass Google Trends, Baidu Index, or any external system's rate limits, risk controls, account permissions, or access restrictions.
+
 English | [简体中文](README.zh-CN.md)
 
 `ohmytrends` is a Bun-only API / CLI for querying Google Trends and Baidu Index

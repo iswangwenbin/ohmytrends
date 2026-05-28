@@ -1,5 +1,8 @@
 # ohmytrends
 
+> [!IMPORTANT]
+> 温馨提示：建议使用专门的小号登录本工具，避免使用重要的个人主账号。请合理控制查询频率，不要进行高频或批量请求。ohmytrends 只能在你已登录并可正常访问对应服务的前提下帮助获取趋势数据，无法绕过或突破 Google Trends、百度指数等外部系统自身的访问限制、风控策略、账号权限或访问规则。
+
 [English](README.md) | 简体中文
 
 `ohmytrends` 是一个只支持 Bun 的命令行工具，用来通过 API / CLI 的方式查询 Google Trends 和百度指数
